@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 rand = "0.8.5"
+console = "0.15.4"
+dialoguer = "0.10.2"

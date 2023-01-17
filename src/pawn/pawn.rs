@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use crate::inventory::item::{Item, Spell};
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Copy, Clone)]
 pub struct Characteristics {
     pub force: u8,
     pub dexterity: u8,
@@ -11,31 +11,40 @@ pub struct Characteristics {
     pub charisma: u8,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pawn {
     pub name: String,
     pub life: u8,
     pub mana: u8,
     pub characteristics: Characteristics,
-    pub inventory: Vec<Rc<Item>>,
+    pub inventory: Vec<Item>,
+    pub equipped: Option<Rc<Item>>,
     pub spell: Vec<Rc<Spell>>,
     pub race: String,
     pub playable: bool,
 }
 
 impl Pawn {
-    fn hit(&self, damage: u8, target: &mut Pawn) {
+    pub fn hit(&self, damage: u8, target: &mut Pawn) {
         target.take_hit(damage)
     }
 
-    fn take_hit(&mut self, damage: u8) {
+    pub fn take_hit(&mut self, damage: u8) {
         println!("{} take {} damages", self.name, damage);
         self.life -= damage;
     }
 
-    fn heal(&self, heal_points: u8, target: &mut Pawn) {
+    pub fn heal(&self, heal_points: u8, target: &mut Pawn) {
         println!("{} take {} damages", self.name, heal_points);
 
         target.take_hit(heal_points)
+    }
+
+    pub fn equip(&mut self, item: Rc<Item>) {
+        self.equipped = Some(item);
+    }
+
+    pub fn de_equip(&mut self) {
+        self.equipped = None;
     }
 }

@@ -25,17 +25,17 @@ pub trait Pocketable {
     fn get_damage_type(&self) -> Option<DamageTypeEnum>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Item {
-    name: String,
-    damages: u8,
-    requirements: Characteristics,
-    resistances: Option<DamageTypeEnum>,
-    power_up: Option<Characteristics>,
-    damages_type: Option<DamageTypeEnum>,
+    pub name: String,
+    pub damages: u8,
+    pub requirements: Characteristics,
+    pub resistances: Option<DamageTypeEnum>,
+    pub power_up: Option<Characteristics>,
+    pub damages_type: Option<DamageTypeEnum>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Spell {
     name: String,
     damages: u8,
