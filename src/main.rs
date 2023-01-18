@@ -19,6 +19,7 @@ mod environment;
 mod services;
 mod interact;
 mod logic;
+mod gui;
 
 fn main() -> std::io::Result<()> {
     let sword = Item {
