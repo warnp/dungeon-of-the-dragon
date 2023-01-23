@@ -1,4 +1,5 @@
 use std::cell::{Ref, RefCell, RefMut};
+use std::fmt::format;
 use std::io::{Error, stdout, Write};
 use std::iter::Filter;
 use std::rc::{Rc, Weak};
@@ -8,9 +9,11 @@ use dialoguer::Select;
 use dialoguer::theme::ColorfulTheme;
 use crate::environment::world::World;
 use crate::interact::Actions::Actions;
-use crate::inventory::item::{Item, Pocketable, Spell};
+use crate::inventory::item::{Item, ItemAttackTypeEnum, PartToEquiEnum, Pocketable, Spell};
 use crate::menu;
-use crate::pawn::pawn::Pawn;
+use crate::pawn::pawn::{Characteristics, Pawn};
+use crate::services::{interactions::Attack, dice::Dice};
+use crate::services::dice::RollDiceResult;
 
 pub struct GameLoop;
 
@@ -65,13 +68,38 @@ impl GameLoop {
         if let Some(action) = actions {
             return match action.into() {
                 Actions::USE => Ok(()),
-                Actions::WATCH => Ok(()),
+                Actions::WATCH => Self::watch_action(stdout, creatures),
                 Actions::WALK_TO => Ok(()),
                 Actions::ATTACK => Self::attack_action(stdout, creatures, player.clone()),
                 Actions::OPEN => Ok(()),
                 Actions::EQUIP => Self::equip_item(stdout, player)
             };
         }
+        Ok(())
+    }
+
+    fn watch_action(stdout: &Term, creatures: Vec<&Rc<RefCell<Pawn>>>) -> Result<(), Error> {
+
+        if creatures.is_empty() {
+            stdout.write_line("Nothing to see here")?;
+            return Ok(());
+        }
+
+        //TODO use perception here
+        //TODO Add item in room
+        stdout.write_line("What ?")?;
+
+        let creatures_name = creatures.iter()
+            .filter(|e| e.borrow().life > 0)
+            .map(|e| e.borrow().name.clone())
+            .collect::<Vec<String>>();
+        let option = menu!(creatures_name);
+
+        if let Some(creature_id) = option {
+            let creature = *creatures.get(creature_id).unwrap();
+            stdout.write_line(&format!("{:#?}", creature))?;
+        }
+
         Ok(())
     }
 
@@ -105,7 +133,33 @@ impl GameLoop {
             stdout.write_line(&format!("You equipped {}", item.clone().name))?;
             mutable_player.equip(Rc::new(item));
         } else {
-            mutable_player.de_equip();
+            stdout.write_line("What part do you want to unequip?")?;
+            let part_to_unequip = menu!([
+                PartToEquiEnum::HEAD,
+                PartToEquiEnum::FEET,
+                PartToEquiEnum::LEGS,
+                PartToEquiEnum::RIGHT_HAND,
+                PartToEquiEnum::LEFT_HAND,
+                PartToEquiEnum::BODY
+            ]);
+
+            let equip_enum = {
+                if let Some(part) = part_to_unequip {
+                    match part {
+                        0 => PartToEquiEnum::HEAD,
+                        1 => PartToEquiEnum::FEET,
+                        2 => PartToEquiEnum::LEGS,
+                        3 => PartToEquiEnum::RIGHT_HAND,
+                        4 => PartToEquiEnum::LEFT_HAND,
+                        5 => PartToEquiEnum::BODY,
+                        _ => PartToEquiEnum::BODY,
+                    }
+                } else {
+                    PartToEquiEnum::BODY
+                }
+            };
+
+            mutable_player.de_equip(equip_enum);
         }
         Ok(())
     }
@@ -113,6 +167,7 @@ impl GameLoop {
     fn attack_action(stdout: &Term, creatures: Vec<&Rc<RefCell<Pawn>>>, player: Rc<RefCell<Pawn>>) -> std::io::Result<()> {
         let attackable_things = creatures.clone()
             .iter()
+            .filter(|&&e| e.borrow().life > 0)
             .map(|&c| {
                 c.borrow().name.clone()
             })
@@ -125,9 +180,74 @@ impl GameLoop {
             return Ok(());
         }
 
-        stdout.write_line("Attack what?")?;
+        stdout.write_line("whith ?")?;
 
         //Select action
+        let action = menu!(["your equipped weapon", "a spell"]);
+
+        let select_item_to_attack_with = Attack::select_item_to_attack_with(stdout, &player, action)?;
+
+        if let None = select_item_to_attack_with {
+            stdout.write_line("You have no way to deal damage to any target!")?;
+            return Ok(());
+        }
+
+        let unwrapped_selected_item = select_item_to_attack_with.unwrap();
+        let usability = player.borrow().calculate_usability(unwrapped_selected_item.clone(), stdout)?;
+
+        if usability == 0 {
+            stdout.write_line("You don't know what to do!")?;
+            return Ok(());
+        }
+
+        stdout.write_line("Attack what?")?;
+        let selected_creature = Self::select_target(creatures, attackable_things)?;
+
+        stdout.write_line("Roll 1d20 : ")?;
+
+        // Roll dice
+        match Attack::roll_attack() {
+            RollDiceResult::Critical => {
+                stdout.write_line("Critial!")?;
+
+                let damages_dealt = player.clone().borrow().hit(unwrapped_selected_item.clone(), selected_creature.clone());
+                stdout.write_line(&format!("{} inflict {} to {}", player.clone().borrow().name, damages_dealt, selected_creature.clone().borrow().name))?;
+            }
+            RollDiceResult::Fumble => {
+                stdout.write_line("Fumble")?;
+            }
+            RollDiceResult::Normal(dice_result) => {
+                stdout.write_line(&format!("Normal attack, dice result : {}", dice_result))?;
+
+                let target_armor_points = selected_creature.clone().borrow().calculate_armor_points();
+
+                //Add modificator to dice roll
+                let dice_result = if let Some(attack_type) = unwrapped_selected_item.clone().get_attack_type() {
+                    let characteristics = player.clone().borrow().characteristics;
+                    match attack_type {
+                        ItemAttackTypeEnum::CONTACT => dice_result + characteristics.force,
+                        ItemAttackTypeEnum::DISTANCE => dice_result + characteristics.dexterity,
+                        ItemAttackTypeEnum::MAGIC => dice_result + characteristics.willpower,
+                    }
+                } else {
+                    dice_result
+                };
+
+                // Check if target CA is greater than dice roll with modificator
+                if target_armor_points < dice_result {
+                    let damages_dealt = player.clone().borrow().hit(unwrapped_selected_item.clone(), selected_creature.clone());
+                    stdout.write_line(&format!("{} inflict {} to {}", player.clone().borrow().name, damages_dealt, selected_creature.clone().borrow().name))?;
+                } else {
+                    stdout.write_line(&format!("{} cannot inflict damage to {}", player.clone().borrow().name, selected_creature.clone().borrow().name))?;
+                }
+            }
+        };
+
+
+        return Ok(());
+    }
+
+    fn select_target(creatures: Vec<&Rc<RefCell<Pawn>>>, attackable_things: Vec<String>) -> std::io::Result<&Rc<RefCell<Pawn>>> {
         let target = menu!(attackable_things);
 
         let selected_creature = {
@@ -138,78 +258,6 @@ impl GameLoop {
                 creatures.get(0).unwrap().clone()
             }
         };
-
-        stdout.write_line("whith ?")?;
-
-        //Select action
-        let action = menu!(["your equipped weapon", "a spell"]);
-
-        let damages_willing_to_deal = {
-            if let Some(act) = action {
-                match act {
-                    0 => (),
-                    1 => {
-                        let borrowed_player = player.borrow();
-                        if borrowed_player.spell.is_empty() {
-                            stdout.write_line("You have no spell to cast.")?;
-                            return Ok(());
-                        }
-                        //Select spell
-                        if let Some(s) = menu!(borrowed_player
-                            .spell
-                            .iter()
-                            .map(|x| x.get_name())
-                            .collect::<Vec<&str>>()) {
-                            let selected_spell = borrowed_player.spell.get(s).unwrap().clone();
-
-                            Self::calculate_damage_to_deal(selected_spell.clone(), player.clone(), stdout)?;
-
-
-
-                        } else {
-                            stdout.write_line("You have no spell to cast.")?;
-                        }
-                    }
-                    _ => ()
-                }
-            }
-        };
-        player.borrow().hit(10, selected_creature.clone());
-
-        return Ok(());
-    }
-
-
-    fn calculate_damage_to_deal(damage_dealer_pocketable: Rc<dyn Pocketable>, player: Rc<RefCell<Pawn>>, stdout: &Term) -> std::io::Result<u8> {
-        let borrowed_player = player.borrow();
-
-        //Calculate total characteristics
-        let charac = {
-            if let Some(equipped_item) = borrowed_player.clone().equipped {
-                if let Some(power_up) = equipped_item.power_up {
-                    borrowed_player.characteristics + power_up
-                }else {
-                    borrowed_player.characteristics
-                }
-            }else {
-                borrowed_player.characteristics
-            }
-        };
-
-        let usability = damage_dealer_pocketable.clone().calculate_usability(&charac, Some(borrowed_player.mana));
-        let pocketable_name = damage_dealer_pocketable.clone().get_name().to_string();
-
-        let random1 = rand::random::<u8>();
-
-
-        if usability > 127 {
-            stdout.write_line(&format!("Good use of {}", pocketable_name))?;
-
-        } else if usability > 0 {
-            stdout.write_line(&format!("Average use of {}", pocketable_name))?;
-        } else {
-            stdout.write_line(&format!("You don't know how to use {}", pocketable_name))?;
-        }
-        Ok(0)
+        Ok(selected_creature)
     }
 }

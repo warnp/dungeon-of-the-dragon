@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use crate::pawn::pawn::Characteristics;
 
 #[derive(Debug, Clone)]
@@ -9,6 +10,13 @@ pub enum DamageTypeEnum {
     FIRE,
     ICE,
     HEAL,
+}
+
+#[derive(Debug, Clone)]
+pub enum ItemAttackTypeEnum {
+    CONTACT,
+    DISTANCE,
+    MAGIC
 }
 
 pub trait Pocketable {
@@ -23,34 +31,58 @@ pub trait Pocketable {
     fn get_power_up(&self) -> &Option<Characteristics>;
 
     fn get_damage_type(&self) -> Option<DamageTypeEnum>;
+
+    fn get_attack_type(&self) -> Option<ItemAttackTypeEnum>;
+
+}
+
+#[derive(Debug, Clone,Eq, Hash, PartialEq)]
+pub enum PartToEquiEnum {
+    HEAD,
+    RIGHT_HAND,
+    LEFT_HAND,
+    BODY,
+    LEGS,
+    FEET
+}
+
+impl Display for PartToEquiEnum{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Item {
     pub name: String,
-    pub damages: u8,
+    pub damages: fn() -> u8,
     pub requirements: Characteristics,
     pub resistances: Option<DamageTypeEnum>,
     pub power_up: Option<Characteristics>,
     pub damages_type: Option<DamageTypeEnum>,
+    pub part_to_equip: PartToEquiEnum,
+    pub armor_point: u8,
+    pub attack_type: Option<ItemAttackTypeEnum>
 }
 
 #[derive(Debug, Clone)]
 pub struct Spell {
-    name: String,
-    damages: u8,
-    mana: u8,
-    passive: bool,
-    requirements: Characteristics,
-    effect_time_turns: u8,
-    resistances: Option<DamageTypeEnum>,
-    power_up: Option<Characteristics>,
-    damages_type: Option<DamageTypeEnum>,
+    pub name: String,
+    pub damages: fn() -> u8,
+    pub mana: u8,
+    pub passive: bool,
+    pub requirements: Characteristics,
+    pub effect_time_turns: u8,
+    pub resistances: Option<DamageTypeEnum>,
+    pub power_up: Option<Characteristics>,
+    pub damages_type: Option<DamageTypeEnum>,
+    pub attack_type: Option<ItemAttackTypeEnum>
+
 }
 
 impl Pocketable for Item {
     fn get_damages(&self) -> u8 {
-        self.damages
+        (self.damages)()
     }
 
     fn get_resistance(&self) -> Option<DamageTypeEnum> {
@@ -147,11 +179,15 @@ impl Pocketable for Item {
     fn get_damage_type(&self) -> Option<DamageTypeEnum> {
         self.damages_type.clone()
     }
+
+    fn get_attack_type(&self) -> Option<ItemAttackTypeEnum> {
+        self.attack_type.clone()
+    }
 }
 
 impl Pocketable for Spell {
     fn get_damages(&self) -> u8 {
-        self.damages
+        (self.damages)()
     }
 
     fn get_resistance(&self) -> Option<DamageTypeEnum> {
@@ -256,5 +292,10 @@ impl Pocketable for Spell {
     fn get_damage_type(&self) -> Option<DamageTypeEnum> {
         self.damages_type.clone()
     }
+
+    fn get_attack_type(&self) -> Option<ItemAttackTypeEnum> {
+        self.attack_type.clone()
+    }
+
 }
 

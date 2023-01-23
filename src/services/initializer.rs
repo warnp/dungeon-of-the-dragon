@@ -3,7 +3,9 @@ use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
 use crate::environment::world::{Place, Weather, World};
+use crate::inventory::item::{DamageTypeEnum, ItemAttackTypeEnum, Spell};
 use crate::pawn::pawn::{Characteristics, Pawn};
+use crate::services::dice::Dice;
 
 pub struct Initializer;
 
@@ -77,12 +79,34 @@ impl Initializer {
                 charisma: 0,
             },
             inventory: vec![],
-            equipped: None,
+            equipped: Default::default(),
             spell: vec![],
             race: "Goblin".to_string(),
             playable: false,
         })))
             .take(x as usize)
             .collect::<Vec<Rc<RefCell<Pawn>>>>()
+    }
+
+    pub fn generate_spells() -> Vec<Rc<Spell>> {
+        vec![Rc::new(Spell {
+            name: "Fireball".to_string(),
+            damages: || (Dice::roll_1d4() + Dice::roll_1d4()) as u8,
+            mana: 20,
+            passive: false,
+            requirements: Characteristics {
+                force: 0,
+                dexterity: 0,
+                constitution: 0,
+                intelligence: 2,
+                willpower: 0,
+                charisma: 0,
+            },
+            effect_time_turns: 0,
+            resistances: None,
+            power_up: None,
+            damages_type: Some(DamageTypeEnum::FIRE),
+            attack_type: Some(ItemAttackTypeEnum::MAGIC),
+        })]
     }
 }
