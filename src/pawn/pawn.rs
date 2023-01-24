@@ -38,7 +38,7 @@ pub struct Pawn {
     pub life: u8,
     pub mana: u8,
     pub characteristics: Characteristics,
-    pub inventory: Vec<Item>,
+    pub inventory: Vec<Rc<Item>>,
     pub equipped: EquipablePart,
     pub spell: Vec<Rc<Spell>>,
     pub race: String,

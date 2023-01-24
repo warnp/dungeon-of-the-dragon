@@ -47,9 +47,9 @@ fn main() -> std::io::Result<()> {
     let player1 = Rc::new(RefCell::new(Pawn {
         name: "Toto".to_string(),
         life: 100,
-        spell: vec![spells.get(0).unwrap()],
+        spell: vec![spells.get(0).unwrap().clone()],
         race: "Humain".to_string(),
-        inventory: vec![sword],
+        inventory: vec![Rc::new(sword)],
         mana: 100,
         characteristics: Characteristics {
             force: 3,
