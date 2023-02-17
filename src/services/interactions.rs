@@ -3,8 +3,9 @@ use dialoguer::Select;
 use std::cell::RefCell;
 use std::rc::Rc;
 use console::Term;
+use std::sync::mpsc::{Sender, Receiver};
+use crate::gui::menu::Menu;
 use crate::inventory::item::Pocketable;
-use crate::menu;
 use crate::pawn::pawn::Pawn;
 use crate::services::dice::{Dice, RollDiceResult};
 
@@ -12,11 +13,11 @@ pub struct Attack;
 
 impl Attack{
 
-    pub fn select_item_to_attack_with(stdout: &Term, player: Rc<RefCell<Pawn>>, action: Option<usize>) -> std::io::Result<Option<Rc<dyn Pocketable>>> {
+    pub fn select_item_to_attack_with( player: Rc<RefCell<Pawn>>, action: Option<usize>, menu: &Menu) -> std::io::Result<Option<Rc<dyn Pocketable>>> {
         return if let Some(act) = action {
             match act {
                 0 => Self::get_weapon(player.clone()),
-                1 => Self::get_spell(stdout, player.clone()),
+                1 => Self::get_spell(player.clone(), menu),
                 _ => Ok(None)
             }
         } else {
@@ -33,21 +34,22 @@ impl Attack{
         }
     }
 
-    fn get_spell(stdout: &Term, player: Rc<RefCell<Pawn>>) -> std::io::Result<Option<Rc<dyn Pocketable>>> {
+    fn get_spell( player: Rc<RefCell<Pawn>>, menu: &Menu) -> std::io::Result<Option<Rc<dyn Pocketable>>> {
         let borrowed_player = player.borrow();
         if borrowed_player.spell.is_empty() {
-            stdout.write_line("You have no spell to cast.")?;
+            menu.write_line("You have no spell to cast.")?;
             return Ok(None);
         }
+
         //Select spell
-        return if let Some(s) = menu!(borrowed_player
+        return if let Some(s) = menu.menu(borrowed_player
                             .spell
                             .iter()
-                            .map(|x| x.get_name())
-                            .collect::<Vec<&str>>()) {
+                            .map(|x| x.get_name().to_string())
+                            .collect::<Vec<String>>())? {
             Ok(Some(borrowed_player.spell.get(s).unwrap().clone()))
         } else {
-            stdout.write_line("You have no spell to cast.")?;
+            menu.write_line("You have no spell to cast.")?;
             Ok(None)
         };
     }

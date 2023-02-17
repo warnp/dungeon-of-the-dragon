@@ -1,18 +1,13 @@
-use std::cell::RefCell;
-use std::fmt::format;
-use std::io::{stdout, Write};
-use std::rc::Rc;
-use crate::inventory::item::DamageTypeEnum::SLASHING;
-use crate::inventory::item::{DamageTypeEnum, Item, ItemAttackTypeEnum, PartToEquiEnum, Spell};
-use crate::pawn::pawn::{Characteristics, EquipablePart, Pawn};
-use crate::services::initializer::Initializer;
-
+use std::env;
+use std::sync::{Arc, mpsc, Mutex};
 use console::Term;
 use dialoguer::Select;
 use dialoguer::theme::ColorfulTheme;
-use crate::interact::Actions::Actions;
+use lazy_static::lazy_static;
 use crate::logic::game_loop::GameLoop;
-use crate::services::dice::Dice;
+use crate::gui::graphical::window;
+use crate::gui::menu::Menu;
+use crate::services::messaging::{MessageContent, Messaging};
 
 mod pawn;
 mod inventory;
@@ -21,50 +16,23 @@ mod services;
 mod interact;
 mod logic;
 mod gui;
+mod ai;
 
-fn main() -> std::io::Result<()> {
-    let spells = Initializer::generate_spells();
 
-    let sword = Item {
-        name: "Basic iron sword".to_string(),
-        damages: || Dice::roll_1d4() as u8,
-        requirements: Characteristics {
-            force: 2,
-            dexterity: 1,
-            constitution: 0,
-            intelligence: 0,
-            willpower: 0,
-            charisma: 0,
-        },
-        resistances: None,
-        power_up: None,
-        damages_type: Some(SLASHING),
-        part_to_equip: PartToEquiEnum::RIGHT_HAND,
-        armor_point: 0,
-        attack_type: Some(ItemAttackTypeEnum::CONTACT),
-    };
+fn main() {
+    let mut messaging = Messaging::init();
 
-    let player1 = Rc::new(RefCell::new(Pawn {
-        name: "Toto".to_string(),
-        life: 100,
-        spell: vec![spells.get(0).unwrap().clone()],
-        race: "Humain".to_string(),
-        inventory: vec![Rc::new(sword)],
-        mana: 100,
-        characteristics: Characteristics {
-            force: 3,
-            dexterity: 3,
-            constitution: 0,
-            intelligence: 3,
-            willpower: 0,
-            charisma: 0,
-        },
-        playable: true,
-        equipped: Default::default(),
-    }));
+    messaging.add_subscription("sprite".to_string());
+    messaging.add_subscription("select".to_string());
+    messaging.add_subscription("stdout".to_string());
 
-    let weather_list = Initializer::init_weather();
-    let world = Initializer::init(&weather_list, player1.clone());
 
-    GameLoop::iterate(world)
+    let messaging_thread = Arc::new(Mutex::new(messaging));
+    Messaging::start_bus(messaging_thread.clone()).unwrap();
+
+
+    let game_loop = GameLoop::init(messaging_thread.clone());
+    GameLoop::iterate(Arc::new(game_loop));
+    #[cfg(feature = "graphical_mode")]
+    let toto = window::init(messaging_thread.clone());
 }

@@ -34,8 +34,10 @@ pub trait Pocketable {
 
     fn get_attack_type(&self) -> Option<ItemAttackTypeEnum>;
 
-}
+    fn get_characteristics(&self) -> Characteristics;
 
+}
+#[warn(non_camel_case_types)]
 #[derive(Debug, Clone,Eq, Hash, PartialEq)]
 pub enum PartToEquiEnum {
     HEAD,
@@ -81,6 +83,7 @@ pub struct Spell {
 }
 
 impl Pocketable for Item {
+
     fn get_damages(&self) -> u8 {
         (self.damages)()
     }
@@ -93,7 +96,7 @@ impl Pocketable for Item {
         &self.name
     }
 
-    fn calculate_usability(&self, pawn_charac: &Characteristics, mana: Option<u8>) -> u8 {
+    fn calculate_usability(&self, pawn_charac: &Characteristics, _mana: Option<u8>) -> u8 {
         let adjustment_value = 2;
         let mut result = 0;
 
@@ -183,9 +186,18 @@ impl Pocketable for Item {
     fn get_attack_type(&self) -> Option<ItemAttackTypeEnum> {
         self.attack_type.clone()
     }
+
+    fn get_characteristics(&self) -> Characteristics {
+        self.requirements
+    }
 }
 
 impl Pocketable for Spell {
+
+    fn get_characteristics(&self) -> Characteristics {
+        self.requirements
+    }
+
     fn get_damages(&self) -> u8 {
         (self.damages)()
     }

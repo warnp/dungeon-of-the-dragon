@@ -2,8 +2,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Add;
 use std::rc::Rc;
-use console::Term;
-use crate::inventory::item::{DamageTypeEnum, Item, PartToEquiEnum, Pocketable, Spell};
+use crate::ai::ai::AI;
+use crate::gui::graphical::sprite::{Layer, ObjectToSprite, Sprite};
+use crate::gui::menu::Menu;
+use crate::inventory::item::{Item, ItemAttackTypeEnum, PartToEquiEnum, Pocketable, Spell};
 
 pub const CA: u8 = 10;
 
@@ -33,7 +35,14 @@ impl Add for Characteristics {
 }
 
 #[derive(Debug, Clone)]
+pub struct Position {
+    pub x: u16,
+    pub y: u16,
+}
+
+#[derive(Debug, Clone)]
 pub struct Pawn {
+    pub id: i64,
     pub name: String,
     pub life: u8,
     pub mana: u8,
@@ -43,11 +52,13 @@ pub struct Pawn {
     pub spell: Vec<Rc<Spell>>,
     pub race: String,
     pub playable: bool,
+    pub ai: Rc<RefCell<Option<AI>>>,
+    pub position: Position,
 }
 
 impl Pawn {
-    pub fn hit(&self, item: Rc<dyn Pocketable> , target: Rc<RefCell<Pawn>>) -> u8 {
-        target.borrow_mut().take_hit(item.clone().get_damages())
+    pub fn hit(&self, item: Rc<dyn Pocketable>, target: Rc<RefCell<Pawn>>) -> u8 {
+        target.clone().borrow_mut().take_hit(item.clone().get_damages())
     }
 
     pub fn take_hit(&mut self, damage: u8) -> u8 {
@@ -96,22 +107,36 @@ impl Pawn {
             )
     }
 
-    pub fn calculate_usability(&self, damage_dealer_pocketable: Rc<dyn Pocketable>, stdout: &Term) -> std::io::Result<u8> {
+    pub fn calculate_usability(&self, damage_dealer_pocketable: Rc<dyn Pocketable>, menu: &Menu) -> std::io::Result<u8> {
 
         //Calculate total characteristics
         let charac = self.characteristics + self.calculate_power_up().unwrap();
 
-        let usability = damage_dealer_pocketable.clone().calculate_usability(&charac, Some(self.mana));
-        let pocketable_name = damage_dealer_pocketable.clone().get_name().to_string();
+        let item_clone = damage_dealer_pocketable.clone();
 
+        let mana = {
+            if let Some(attack_type) = item_clone.get_attack_type() {
+                match attack_type {
+                    ItemAttackTypeEnum::CONTACT | ItemAttackTypeEnum::DISTANCE => None,
+                    ItemAttackTypeEnum::MAGIC => Some(self.mana)
+                }
+            } else {
+                None
+            }
+        };
+
+        let usability = item_clone.calculate_usability(&charac, mana);
+        let pocketable_name = item_clone.get_name().to_string();
+
+        menu.write_line(format!("usability {}, charac {:#?}, pocketable charac {:#?}", usability, charac, item_clone.get_characteristics()).as_str())?;
         if usability > 127 {
-            stdout.write_line(&format!("Good use of {}", pocketable_name))?;
+            menu.write_line(&format!("Good use of {}", pocketable_name))?;
             Ok(usability)
         } else if usability > 0 {
-            stdout.write_line(&format!("Average use of {}", pocketable_name))?;
+            menu.write_line(&format!("Average use of {}", pocketable_name))?;
             Ok(usability)
         } else {
-            stdout.write_line(&format!("You don't know how to use {}", pocketable_name))?;
+            menu.write_line(&format!("You don't know how to use {}", pocketable_name))?;
             Ok(0)
         }
     }
@@ -121,7 +146,7 @@ impl Pawn {
 
         if total_armor > 0 {
             total_armor + CA
-        }else{
+        } else {
             self.dex_total() + CA
         }
     }
@@ -154,6 +179,18 @@ impl Pawn {
             .reduce(|acc, el| acc + el)
             .unwrap_or(0);
         total_armor
+    }
+}
+
+impl ObjectToSprite for Pawn {
+    fn get_world_origin(&self) -> Vec<Sprite> {
+        let texture_id = match self.race.as_str() {
+            "human" => 200,
+            "goblin" => 201,
+            _ => 201
+        };
+
+        vec![Sprite::new(texture_id, self.position.x as i32, self.position.y as i32, Layer::MOVABLES)]
     }
 }
 
