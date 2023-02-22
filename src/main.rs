@@ -51,5 +51,5 @@ fn main() {
 
 
     // #[cfg(feature = "graphical_mode")]
-    window::init(messenger_ui_map_receiver).unwrap();
+    window::init(messenger_ui_map_receiver, messenger_ui_map_sender).unwrap();
 }

@@ -13,8 +13,6 @@ pub struct MessageContent {
 pub struct Messaging {
     pub incoming_messages: Vec<Receiver<MessageContent>>,
     pub outcoming_messages: Vec<(String, Sender<MessageContent>)>,
-    bus_thread: Option<JoinHandle<()>>,
-    thread_lifecycle: Option<Sender<bool>>,
 }
 
 impl Messaging {
@@ -22,8 +20,6 @@ impl Messaging {
         Self {
             incoming_messages: vec![],
             outcoming_messages: vec![],
-            bus_thread: None,
-            thread_lifecycle: None,
         }
     }
 
@@ -46,7 +42,6 @@ impl Messaging {
 
             //We handle message while we do not get lifecycle message to close the bus
             loop {
-
                 incoming_messages.iter()
                     .enumerate()
                     .for_each(|(i, rx)| {
@@ -61,18 +56,14 @@ impl Messaging {
                                         Ok(()) => println!("Message on topic {} distibuted", topic),
                                         Err(e) => {
                                             println!("Error while distributing message on topic {} : {:#?}", topic, e.to_string());
-                                            // buffer.push((topic, v));
                                         }
                                     }
                                 })
                         }
                     });
             }
-            println!("Stop message bus loop");
         });
 
-        // let arc = messaging.clone();
-        // arc.lock().unwrap().bus_thread = Some(handle);
         Ok(())
     }
 }

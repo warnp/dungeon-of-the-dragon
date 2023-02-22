@@ -17,7 +17,8 @@ pub struct MainState {
     sprites_background: Vec<(Image, DrawParam)>,
     sprites_ui: Vec<(Image, DrawParam)>,
     mouse: Mouse,
-    messenger: HashMap<String, Receiver<MessageContent>>,
+    receivers: HashMap<String, Receiver<MessageContent>>,
+    senders: HashMap<String, Sender<MessageContent>>,
     sprites_textures: BTreeMap<u8, Image>,
     stdout: String,
     current_menu: Vec<String>,
@@ -34,7 +35,8 @@ impl Default for MainState {
             sprites_background: vec![],
             sprites_ui: vec![],
             mouse: Default::default(),
-            messenger: HashMap::new(),
+            receivers: HashMap::new(),
+            senders: HashMap::new(),
             sprites_textures: Default::default(),
             stdout: String::new(),
             current_menu: vec![],
@@ -64,7 +66,7 @@ impl Mouse {
 }
 
 impl MainState {
-    fn new(ctx: &Context, messenger: HashMap<String, Receiver<MessageContent>>) -> GameResult<MainState> {
+    fn new(ctx: &Context, receivers: HashMap<String, Receiver<MessageContent>>, senders: HashMap<String, Sender<MessageContent>>) -> GameResult<MainState> {
         let mouse = Mouse {
             pos_y: 0.,
             pos_x: 0.,
@@ -81,7 +83,8 @@ impl MainState {
 
         let s = MainState {
             mouse,
-            messenger,
+            receivers,
+            senders,
             sprites_textures: textures,
             ..Default::default()
         };
@@ -128,10 +131,10 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 .position(|b| b.x < x && b.x + b.w > x &&
                     b.x < x && b.x + b.w > x);
             if let Some(menu_option) = self.selected_menu_option {
-                // self.messenger.get("select_response").unwrap().send( MessageContent {
-                //     topic: "select_response".to_string(),
-                //     content: menu_option.to_be_bytes().to_vec(),
-                // }).unwrap();
+                self.senders.get("select_response").unwrap().send( MessageContent {
+                    topic: "select_response".to_string(),
+                    content: menu_option.to_be_bytes().to_vec(),
+                }).unwrap();
             }
             return Ok(());
         }
@@ -155,14 +158,14 @@ impl event::EventHandler<ggez::GameError> for MainState {
         let point2 = ctx.mouse.position();
 
         //Get stdout
-        if let Some(stdout_container) = self.messenger.get("stdout") {
+        if let Some(stdout_container) = self.receivers.get("stdout") {
             if let Ok(text) = stdout_container.try_recv() {
                 self.stdout = format!("{}\n{}", self.stdout, from_utf8(text.content.as_slice()).unwrap());
             }
         }
 
         //Get menu
-        if let Some(select_container) = self.messenger.get("select") {
+        if let Some(select_container) = self.receivers.get("select") {
             if let Ok(text) = select_container.try_recv() {
                 self.current_menu = from_utf8(text.content.as_slice())
                     .unwrap()
@@ -173,7 +176,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
         }
 
         //Get sprites
-        if let Some(receiver) = self.messenger.get("sprite") {
+        if let Some(receiver) = self.receivers.get("sprite") {
             if let Ok(sprites) = receiver.try_recv() {
                 let image_creation = |s: &Sprite| {
                     let param = DrawParam::new().dest(Vec2::new((s.pos_x * SPRITE_SIZE) as f32, (s.pos_y * SPRITE_SIZE) as f32));
@@ -238,13 +241,13 @@ impl event::EventHandler<ggez::GameError> for MainState {
     }
 }
 
-pub fn init(messenger: HashMap<String, Receiver<MessageContent>>) -> GameResult {
+pub fn init(receivers: HashMap<String, Receiver<MessageContent>>, senders: HashMap<String, Sender<MessageContent>>) -> GameResult {
     let cb = ggez::ContextBuilder::new("super simple", "ggez")
         .window_mode(WindowMode::default().dimensions(800.0, 600.0))
         .window_setup(WindowSetup::default().samples(NumSamples::Four));
     let (mut ctx, event_loop) = cb.build()?;
 
 
-    let state = MainState::new(&ctx, messenger)?;
+    let state = MainState::new(&ctx, receivers, senders)?;
     event::run(ctx, event_loop, state)
 }
