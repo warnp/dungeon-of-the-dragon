@@ -1,7 +1,8 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use crate::environment::world::World;
 use crate::gui::graphical::sprite::{Layer, ObjectToSprite, Sprite};
@@ -9,23 +10,15 @@ use crate::gui::menu::Menu;
 use crate::interact::actions::Actions;
 use crate::pawn::pawn::{Characteristics, Pawn, Position};
 use crate::services::initializer::Initializer;
-use crate::services::messaging::{MessageContent, Messaging};
+use crate::services::messaging::MessageContent;
 
-pub struct GameLoop {
-    menu: Menu,
-    messenger: Arc<Mutex<Messaging>>,
-}
+pub struct GameLoop {}
 
 impl GameLoop {
-    pub fn init(messenger: Arc<Mutex<Messaging>>) -> Self {
-        Self {
-            menu: Menu::init(messenger.clone()),
-            messenger,
-        }
-    }
 
-    pub fn iterate(game_loop: Arc<GameLoop>) {
+    pub fn iterate(senders: HashMap<String, Sender<MessageContent>>, receivers: HashMap<String, Receiver<MessageContent>>, menu: Menu) {
         thread::spawn(move || {
+            let menu = menu;
             let spells = Initializer::generate_spells();
 
             let mut items = Initializer::generate_items();
@@ -56,14 +49,15 @@ impl GameLoop {
             let world = Initializer::init(&weather_list, player1.clone(), &mut items);
 
             //Travel threw places
-            GameLoop::loop_handler(world, game_loop.clone()).unwrap();
+            GameLoop::loop_handler(world, senders, &menu).unwrap();
         });
     }
 
-    fn loop_handler(world: World, game_loop: Arc<GameLoop>) -> std::io::Result<()> {
+    fn loop_handler(world: World, senders: HashMap<String, Sender<MessageContent>>,menu: &Menu) -> std::io::Result<()> {
+        let senders = senders;
         loop {
             let world_current_place = world.places.get(0).unwrap();
-            game_loop.menu.write_line(format!("You arrived in {}", world_current_place.name).as_str()).unwrap();
+            menu.write_line(format!("You arrived in {}", world_current_place.name).as_str()).unwrap();
 
             let pawns: &Vec<Rc<RefCell<Pawn>>> = &world_current_place.pawns;
 
@@ -88,20 +82,9 @@ impl GameLoop {
                 content: bincode::serialize(&pawns_sprites).unwrap(),
             };
 
-            {
-                let messenger_clone = game_loop.clone().messenger.clone();
-                let guard = {
-                    loop {
-                        if let Ok(messenger) = messenger_clone.try_lock() {
-                            break messenger;
-                        }
-                    }
-                };
+            let sender = senders.get("sprite").unwrap();
+            sender.send(message_content).unwrap();
 
-
-                let (sprite_subscription_sender, _) = guard.get_subscription("sprite").unwrap();
-                sprite_subscription_sender.send(message_content).unwrap();
-            }
 
             loop {
                 let creatures = (&pawns)
@@ -112,14 +95,14 @@ impl GameLoop {
                     })
                     .collect::<Vec<String>>();
                 let creatures_count = (&creatures).len();
-                game_loop.menu.write_line(format!("There is {} creatures here : {}",
+                menu.write_line(format!("There is {} creatures here : {}",
                                                   creatures_count,
                                                   creatures.join(", ")
                 ).as_str())?;
 
-                Actions::handle_actions(&Self::order_pawns(pawns)?, &game_loop.clone().menu)?;
+                Actions::handle_actions(&Self::order_pawns(pawns)?, menu)?;
 
-                game_loop.menu.clear_line()?;
+                menu.clear_line()?;
 
                 let sprites = pawns.iter()
                     .map(|p: &Rc<RefCell<Pawn>>| {
@@ -132,12 +115,9 @@ impl GameLoop {
                     content: bincode::serialize(&sprites).unwrap(),
                 };
 
-                {
-                    let messenger_clone = game_loop.clone().messenger.clone();
-                    let guard1 = messenger_clone.lock().unwrap();
-                    let (sprite_sender, _) = guard1.get_subscription("sprite").unwrap();
-                    sprite_sender.send(message_content).unwrap();
-                }
+                let sender = senders.get("sprite").unwrap();
+                sender.send(message_content).unwrap();
+
             }
         }
     }

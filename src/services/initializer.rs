@@ -51,18 +51,18 @@ impl Initializer {
             name: "totoland".to_string(),
             places: vec![
                 Place {
-                    id: 10,
+                    id: 12,
                     name: "La comté".to_string(),
                     weather: Rc::clone(weathers.get(0).unwrap()),
                     time: "Day".to_string(),
                     light: 255,
                     adjacent_places: vec![11],
                     pawns,
-                    room: vec![vec![0,0,11,0,0,0],
-                               vec![0,0,0 ,0,0,0],
-                               vec![0,0,0 ,0,0,0],
-                               vec![0,0,0 ,0,0,0],
-                               vec![0,0,0 ,0,0,0]]
+                    room: vec![vec![10,10,11,10,10,10],
+                               vec![10,10,10 ,10,10,10],
+                               vec![10,10,10 ,10,10,10],
+                               vec![10,10,10 ,10,10,10],
+                               vec![10,10,10 ,10,10,10]]
                 },
                 Place {
                     id: 11,
@@ -72,11 +72,11 @@ impl Initializer {
                     light: 255,
                     adjacent_places: vec![10],
                     pawns: vec![],
-                    room: vec![vec![0,0,0 ,0,0,0],
-                               vec![0,0,0 ,0,0,0],
-                               vec![0,0,0 ,0,0,0],
-                               vec![0,0,0 ,0,0,0],
-                               vec![0,0,10,0,0,0]]
+                    room: vec![vec![10,10,10 ,10,10,10],
+                               vec![10,10,10 ,10,10,10],
+                               vec![10,10,10 ,10,10,10],
+                               vec![10,10,10 ,10,10,10],
+                               vec![10,10,12,10,10,10]]
                 }
             ],
             day: 0,

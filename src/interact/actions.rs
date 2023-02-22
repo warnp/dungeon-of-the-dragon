@@ -3,8 +3,6 @@ use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use console::Term;
 use rand::random;
-use std::sync::mpsc::{Sender, Receiver};
-use std::sync::{Arc, Mutex};
 use crate::inventory::item::{Item, ItemAttackTypeEnum, PartToEquiEnum, Pocketable};
 use crate::ai;
 use crate::pawn::pawn::Pawn;
@@ -12,9 +10,7 @@ use crate::services::dice::RollDiceResult;
 use crate::services::interactions::Attack;
 use crate::Select;
 use crate::ColorfulTheme;
-use crate::gui::menu;
 use crate::gui::menu::Menu;
-use crate::services::messaging::{MessageContent, Messaging};
 
 #[warn(non_camel_case_types)]
 #[derive(Debug)]

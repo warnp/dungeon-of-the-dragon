@@ -1,9 +1,6 @@
-use dialoguer::theme::ColorfulTheme;
-use dialoguer::Select;
 use std::cell::RefCell;
 use std::rc::Rc;
 use console::Term;
-use std::sync::mpsc::{Sender, Receiver};
 use crate::gui::menu::Menu;
 use crate::inventory::item::Pocketable;
 use crate::pawn::pawn::Pawn;

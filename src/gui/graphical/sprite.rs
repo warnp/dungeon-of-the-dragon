@@ -1,4 +1,3 @@
-use ggez::graphics::Color;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Clone, Serialize, Deserialize)]

@@ -1,23 +1,28 @@
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 use console::Term;
 use dialoguer::Select;
 use dialoguer::theme::ColorfulTheme;
 use lazy_static::lazy_static;
-use crate::services::messaging::{MessageContent, Messaging};
+use crate::services::messaging::MessageContent;
 
 lazy_static! {
     static ref STDOUT: Term = Term::stdout();
 }
 
 pub struct Menu {
-    messenger: Arc<Mutex<Messaging>>,
+    select_menu: Sender<MessageContent>,
+    selected_option: Receiver<MessageContent>,
+    stdout: Sender<MessageContent>,
 }
 
 impl Menu {
-    pub fn init(messenger: Arc<Mutex<Messaging>>) -> Self {
+    pub fn init(select_menu: Sender<MessageContent>, selected_option: Receiver<MessageContent>, stdout: Sender<MessageContent>) -> Self {
         Self {
-            messenger
+            selected_option,
+            select_menu,
+            stdout
         }
     }
 
@@ -31,29 +36,24 @@ impl Menu {
         }
         #[cfg(feature = "graphical_mode")]
         {
-            let mut x = self.messenger.lock().unwrap();
-            let (tx, rx) = x.get_subscription("select").unwrap();
-
-            tx.send(MessageContent {
+            self.select_menu.send(MessageContent {
                 topic: "select".to_string(),
-                content: bincode::serialize(&options.iter().map(|el| el.clone()).collect::<Vec<String>>()).unwrap(),
+                content: bincode::serialize(&options.iter().map(|el| format!("{}\n",el.clone())).collect::<Vec<String>>()).unwrap(),
             }).unwrap();
 
-            std::mem::drop(x);
 
-            let response_topic = "select_response";
-            let guard = self.messenger.lock().unwrap();
-            let (tx, rx) = guard.get_subscription(response_topic).unwrap();
             loop {
-                if let Ok(command) = rx.try_recv() {
-                    if response_topic == command.topic.as_str() {
-                        return Ok(Some(bincode::deserialize(command.content.as_slice()).unwrap()));
-                    } else {
-                        return Ok(Some(0));
+                thread::sleep(Duration::new(0, 1000));
+                // println!("pouet {:#?}", self.selected_option);
+                if let Ok(command) = self.selected_option.try_recv() {
+                    println!("menu result {:#?}", command);
+                    if "select_response" == command.topic.as_str() {
+                        let ok = Ok(Some(bincode::deserialize(command.content.as_slice()).unwrap()));
+                        println!("menu result {:#?}", ok);
+                        return ok;
                     }
                 }
             }
-            std::mem::drop(guard);
 
         }
     }
@@ -66,20 +66,12 @@ impl Menu {
 
         #[cfg(feature = "graphical_mode")]
         {
-            let mut guard = {
-                loop {
-                    if let Ok(messenger) = self.messenger.try_lock() {
-                        break messenger;
-                    }
-                }
-            };
             let stdout_topic = "stdout";
-            let (tx, _) = guard.get_subscription(stdout_topic).unwrap();
-            tx.send(MessageContent {
+
+            self.stdout.send(MessageContent {
                 topic: stdout_topic.to_string(),
                 content: bincode::serialize(out).unwrap(),
             }).unwrap();
-            drop(guard);
         }
         Ok(())
     }
