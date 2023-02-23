@@ -15,14 +15,20 @@ pub struct Menu {
     select_menu: Sender<MessageContent>,
     selected_option: Receiver<MessageContent>,
     stdout: Sender<MessageContent>,
+    clear: Sender<MessageContent>,
 }
 
 impl Menu {
-    pub fn init(select_menu: Sender<MessageContent>, selected_option: Receiver<MessageContent>, stdout: Sender<MessageContent>) -> Self {
+    pub fn init(select_menu: Sender<MessageContent>,
+                selected_option: Receiver<MessageContent>,
+                stdout: Sender<MessageContent>,
+                clear: Sender<MessageContent>,
+    ) -> Self {
         Self {
             selected_option,
             select_menu,
-            stdout
+            stdout,
+            clear,
         }
     }
 
@@ -36,25 +42,22 @@ impl Menu {
         }
         #[cfg(feature = "graphical_mode")]
         {
+            let vec = options.join(":");
+            println!("vec : {}", vec);
             self.select_menu.send(MessageContent {
                 topic: "select".to_string(),
-                content: bincode::serialize(&options.iter().map(|el| format!("{}\n",el.clone())).collect::<Vec<String>>()).unwrap(),
+                content: vec.as_bytes().to_vec(),
             }).unwrap();
 
 
             loop {
-                thread::sleep(Duration::new(0, 1000));
-                // println!("pouet {:#?}", self.selected_option);
                 if let Ok(command) = self.selected_option.try_recv() {
-                    println!("menu result {:#?}", command);
                     if "select_response" == command.topic.as_str() {
                         let ok = Ok(Some(bincode::deserialize(command.content.as_slice()).unwrap()));
-                        println!("menu result {:#?}", ok);
                         return ok;
                     }
                 }
             }
-
         }
     }
 
@@ -70,15 +73,25 @@ impl Menu {
 
             self.stdout.send(MessageContent {
                 topic: stdout_topic.to_string(),
-                content: bincode::serialize(out).unwrap(),
+                content: out.as_bytes().to_vec(),
             }).unwrap();
         }
         Ok(())
     }
 
-    pub fn clear_line(&self) -> std::io::Result<()>{
+    pub fn clear_line(&self) -> std::io::Result<()> {
         #[cfg(not(feature = "graphical_mode"))]
         STDOUT.clear_line()?;
+
+        #[cfg(feature = "graphical_mode")]
+        {
+            self.clear.send(MessageContent {
+                topic: "clear".to_string(),
+                content: Vec::new(),
+            }).unwrap();
+        }
+
+
         Ok(())
     }
 }

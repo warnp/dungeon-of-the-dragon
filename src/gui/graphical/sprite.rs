@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(PartialEq, Clone, Serialize, Deserialize)]
+#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub enum Layer {
     BACKGROUND,
     MOVABLES,
@@ -11,7 +11,7 @@ pub trait ObjectToSprite {
     fn get_world_origin(&self) -> Vec<Sprite>;
 }
 
-#[derive(Clone,Serialize, Deserialize)]
+#[derive(Clone,Serialize, Deserialize, Debug)]
 pub struct Sprite {
     pub texture_id: u8,
     pub pos_x: i32,

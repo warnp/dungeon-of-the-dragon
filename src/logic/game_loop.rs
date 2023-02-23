@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 use crate::environment::world::World;
@@ -15,8 +16,7 @@ use crate::services::messaging::MessageContent;
 pub struct GameLoop {}
 
 impl GameLoop {
-
-    pub fn iterate(senders: HashMap<String, Sender<MessageContent>>, receivers: HashMap<String, Receiver<MessageContent>>, menu: Menu) {
+    pub fn iterate(senders: HashMap<String, Sender<MessageContent>>, mut receivers: HashMap<String, Receiver<MessageContent>>, menu: Menu) {
         thread::spawn(move || {
             let menu = menu;
             let spells = Initializer::generate_spells();
@@ -48,12 +48,29 @@ impl GameLoop {
             let weather_list = Initializer::init_weather();
             let world = Initializer::init(&weather_list, player1.clone(), &mut items);
 
+            let world_clone = Arc::new(&world);
+            let toto = world_clone.clone();
+            let (_,x) = receivers.remove_entry("info").unwrap();
+            thread::spawn(move || {
+                loop {
+                    if let Ok(info) = x.try_recv() {
+                        let x1: (f32,f32) = bincode::deserialize(info.content.as_slice()).unwrap();
+                        println!("info {:?}", x1);
+                        let rooms = toto.places.get(0).unwrap().room;
+
+                    }
+
+                }
+
+            });
+
+
             //Travel threw places
-            GameLoop::loop_handler(world, senders, &menu).unwrap();
+            GameLoop::loop_handler(&world, senders, &menu).unwrap();
         });
     }
 
-    fn loop_handler(world: World, senders: HashMap<String, Sender<MessageContent>>,menu: &Menu) -> std::io::Result<()> {
+    fn loop_handler(world: &World, senders: HashMap<String, Sender<MessageContent>>, menu: &Menu) -> std::io::Result<()> {
         let senders = senders;
         loop {
             let world_current_place = world.places.get(0).unwrap();
@@ -61,19 +78,21 @@ impl GameLoop {
 
             let pawns: &Vec<Rc<RefCell<Pawn>>> = &world_current_place.pawns;
 
+            let room_tiles = world_current_place.room.iter()
+                .enumerate()
+                .map(|(row, cols)| cols.iter()
+                    .enumerate()
+                    .map(|(col, &el)| Sprite::new(el, col as i32, row as i32, Layer::BACKGROUND))
+                    .collect::<Vec<Sprite>>())
+                .flatten()
+                .collect::<Vec<Sprite>>();
+
             let pawns_sprites = [pawns.iter().map(|p| {
                 p.clone().borrow().get_world_origin()
             })
                 .flatten()
                 .collect::<Vec<Sprite>>(),
-                world_current_place.room.iter()
-                    .enumerate()
-                    .map(|(row, cols)| cols.iter()
-                        .enumerate()
-                        .map(|(col, &el)| Sprite::new(el, col as i32, row as i32, Layer::BACKGROUND))
-                        .collect::<Vec<Sprite>>())
-                    .flatten()
-                    .collect::<Vec<Sprite>>()]
+                room_tiles.clone()]
                 .concat();
 
 
@@ -96,19 +115,21 @@ impl GameLoop {
                     .collect::<Vec<String>>();
                 let creatures_count = (&creatures).len();
                 menu.write_line(format!("There is {} creatures here : {}",
-                                                  creatures_count,
-                                                  creatures.join(", ")
+                                        creatures_count,
+                                        creatures.join(", ")
                 ).as_str())?;
 
                 Actions::handle_actions(&Self::order_pawns(pawns)?, menu)?;
 
                 menu.clear_line()?;
 
-                let sprites = pawns.iter()
-                    .map(|p: &Rc<RefCell<Pawn>>| {
-                        Sprite::new(0, p.clone().borrow().position.x as i32, p.clone().borrow().position.y as i32, Layer::MOVABLES)
-                    })
-                    .collect::<Vec<Sprite>>();
+                let sprites = [pawns.iter()
+                    .map(|p: &Rc<RefCell<Pawn>>| p.clone().borrow().get_world_origin())
+                    .flatten()
+                    .collect::<Vec<Sprite>>(),
+                    room_tiles.clone()
+                ].concat();
+
 
                 let message_content = MessageContent {
                     topic: "sprite".to_string(),
@@ -117,7 +138,6 @@ impl GameLoop {
 
                 let sender = senders.get("sprite").unwrap();
                 sender.send(message_content).unwrap();
-
             }
         }
     }

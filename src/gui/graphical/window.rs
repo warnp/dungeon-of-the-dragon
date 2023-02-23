@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::ops::Not;
 use std::str::from_utf8;
 use std::sync::mpsc::{Receiver, Sender};
 use ggez::{event, GameError, graphics};
@@ -26,6 +27,7 @@ pub struct MainState {
     menu_to_show: Vec<((f32, f32), Vec<String>)>,
     menu_buttons: Vec<Rect>,
     selected_menu_option: Option<usize>,
+    active_modal: Option<(f32,f32)>
 }
 
 impl Default for MainState {
@@ -44,6 +46,7 @@ impl Default for MainState {
             menu_to_show: vec![],
             menu_buttons: vec![],
             selected_menu_option: None,
+            active_modal: None
         }
     }
 }
@@ -96,25 +99,60 @@ impl MainState {
                         .unwrap(),
                     DrawParam::new()
                         .dest(Vec2::new(x, y))
-                        .scale(Vec2::new(3f32, 5f32)));
+                        .scale(Vec2::new(5f32, 5f32)));
 
         options.iter()
             .enumerate()
             .for_each(|(i, el)| {
-                self.menu_buttons.push(Rect::new(x, y + i as f32 * 20., 3. * 32., 15.));
+                self.menu_buttons.push(Rect::new(x + 10., (y + i as f32 * 20.) + 10.0, 3. * 32., 15.));
 
                 canvas.draw(&Text::new(el),
                             graphics::DrawParam::from([x, y])
                                 .color(Color::WHITE)
                                 .scale(Vec2::new(1., 1.))
-                                .dest(Vec2::new(x, y + i as f32 * 20.)));
+                                .dest(Vec2::new(x + 10., (y + i as f32 * 20.) + 10.)));
             });
 
         Ok(())
     }
+
+    fn draw_modal(&mut self, canvas: &mut Canvas, x: f32, y: f32) -> GameResult<()> {
+        canvas.draw(self.sprites_textures.get(&(0 as u8))
+                        .unwrap(),
+                    DrawParam::new()
+                        .dest(Vec2::new(x, y))
+                        .scale(Vec2::new(5f32, 5f32)));
+        Ok(())
+    }
+
+    fn mouse_hovering_characterisation(&mut self, x: f32, y: f32) {
+        let sprites = self.sprites.iter()
+            .filter(|s| s.pos_y * SPRITE_SIZE < y as i32 && s.pos_y * SPRITE_SIZE + SPRITE_SIZE > y as i32 &&
+                s.pos_x * SPRITE_SIZE < x as i32 && s.pos_x * SPRITE_SIZE + SPRITE_SIZE > x as i32)
+            .map(|e| e.clone())
+            .collect::<Vec<Sprite>>();
+
+        self.senders.get("info").unwrap().send(MessageContent {
+            topic: "info".to_string(),
+            content: bincode::serialize(&(x, y)).unwrap(),
+        }).unwrap();
+
+        self.active_modal = {
+            if sprites.is_empty().not() {
+                Some((x, y))
+            } else {
+                None
+            }
+        }
+    }
 }
 
 impl event::EventHandler<ggez::GameError> for MainState {
+    fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) -> Result<(), GameError> {
+        self.mouse_hovering_characterisation(x, y);
+        Ok(())
+    }
+
     fn mouse_button_up_event(&mut self, _ctx: &mut Context, button: MouseButton, x: f32, y: f32) -> Result<(), GameError> {
         if button != MouseButton::Left {
             return Ok(());
@@ -122,18 +160,19 @@ impl event::EventHandler<ggez::GameError> for MainState {
 
         let button_clicked = self.menu_buttons.iter()
             .filter(|b| b.x < x && b.x + b.w > x &&
-                b.x < x && b.x + b.w > x)
+                b.y < y && b.y + b.h > y)
             .map(|el| el.clone())
             .collect::<Vec<Rect>>();
 
         if button_clicked.len() > 0 {
             self.selected_menu_option = self.menu_buttons.iter()
                 .position(|b| b.x < x && b.x + b.w > x &&
-                    b.x < x && b.x + b.w > x);
+                    b.y < y && b.y + b.h > y);
+
             if let Some(menu_option) = self.selected_menu_option {
-                self.senders.get("select_response").unwrap().send( MessageContent {
+                self.senders.get("select_response").unwrap().send(MessageContent {
                     topic: "select_response".to_string(),
-                    content: menu_option.to_be_bytes().to_vec(),
+                    content: bincode::serialize(&menu_option).unwrap(),
                 }).unwrap();
             }
             return Ok(());
@@ -157,10 +196,18 @@ impl event::EventHandler<ggez::GameError> for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         let point2 = ctx.mouse.position();
 
+        if let Some(clear_container) = self.receivers.get("clear") {
+            if let Ok(clear) = clear_container.try_recv() {
+                self.stdout.clear();
+            }
+        }
+
         //Get stdout
         if let Some(stdout_container) = self.receivers.get("stdout") {
             if let Ok(text) = stdout_container.try_recv() {
-                self.stdout = format!("{}\n{}", self.stdout, from_utf8(text.content.as_slice()).unwrap());
+                let out = format!("{}\n{}", self.stdout, from_utf8(text.content.as_slice()).unwrap());
+                println!("out : {}", out);
+                self.stdout = out;
             }
         }
 
@@ -169,7 +216,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
             if let Ok(text) = select_container.try_recv() {
                 self.current_menu = from_utf8(text.content.as_slice())
                     .unwrap()
-                    .split("\n")
+                    .split(":")
                     .map(|el| el.to_string())
                     .collect();
             }
@@ -212,7 +259,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let fps = ctx.time.fps();
         ctx.gfx.set_window_title(format!("fps: {}", fps).as_str());
-        let mut canvas = graphics::Canvas::from_frame(
+        let mut canvas = Canvas::from_frame(
             ctx,
             graphics::Color::from([0., 0., 0., 1.0]),
         );
@@ -227,13 +274,18 @@ impl event::EventHandler<ggez::GameError> for MainState {
             canvas.draw(&mesh.0, mesh.1);
         }
 
-        canvas.draw(&Text::new(format!("{}", self.stdout)),
-                    graphics::DrawParam::from([200.0, 0.0]).color(Color::WHITE).scale(Vec2::new(1., 1.)));
-
         if self.current_menu.len() > 0 {
             let options = self.current_menu.clone();
             self.draw_menu(&mut canvas, 0., 200.0, options)?;
         }
+
+        canvas.draw(&Text::new(self.stdout.clone()),
+                    graphics::DrawParam::from(Vec2::new(200.0, 0.0)).color(Color::WHITE).scale(Vec2::new(1., 1.)));
+
+        if let Some((x,y)) = self.active_modal {
+            self.draw_modal(&mut canvas, x, y)?;
+        }
+
         canvas.draw(&self.mouse.get_mesh(&ctx), Vec2::new(0.0, 0.0));
 
         canvas.finish(ctx)?;

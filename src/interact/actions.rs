@@ -25,12 +25,12 @@ pub enum Actions {
 
 impl Actions {
     pub fn vec_string() -> Vec<String> {
-        vec![Actions::OPEN.to_string(),
-             Actions::ATTACK.to_string(),
-             Actions::WALK_TO.to_string(),
-             Actions::WATCH.to_string(),
-             Actions::USE.to_string(),
-             Actions::EQUIP.to_string()]
+        vec!["Open".to_string(),
+             "Attack".to_string(),
+             "Walk to".to_string(),
+             "Watch".to_string(),
+             "Use".to_string(),
+             "Equip".to_string()]
     }
 }
 
@@ -75,13 +75,22 @@ impl Actions {
                                                            }
                                                            None
                                                        });
+
             if let Some(action) = actions {
                 match action.into() {
-                    Actions::USE => Ok(()),
+                    Actions::USE => {
+                        println!("USE");
+                        Ok(()) },
                     Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, menu),
-                    Actions::WALK_TO => Ok(()),
+                    Actions::WALK_TO => {
+                        println!("WALK TO");
+
+                        Ok(()) },
                     Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), menu),
-                    Actions::OPEN => Ok(()),
+                    Actions::OPEN => {
+                        println!("OPEN");
+
+                        Ok(()) },
                     Actions::EQUIP => Self::equip_item(current_pawn.clone(), menu)
                 }?;
             }

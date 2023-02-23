@@ -62,7 +62,6 @@ impl Pawn {
     }
 
     pub fn take_hit(&mut self, damage: u8) -> u8 {
-        // self.equipped
         self.life -= damage;
         damage
     }
