@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter, Write};
 use std::ops::Add;
 use std::rc::Rc;
 use crate::ai::ai::AI;
@@ -17,6 +18,19 @@ pub struct Characteristics {
     pub intelligence: u8,
     pub willpower: u8,
     pub charisma: u8,
+}
+
+impl Display for Characteristics {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let characs = format!("Stats : \n\tFOR: {0}\n\tDEX: {1}\n\tCON: {2}\n\tINT: {3}\n\tWIL: {4}\n\tCHA: {5}",
+                              self.force.to_string(),
+                              self.dexterity.to_string(),
+                              self.constitution.to_string(),
+                              self.intelligence.to_string(),
+                              self.willpower.to_string(),
+                              self.charisma.to_string());
+        f.write_str(characs.as_str())
+    }
 }
 
 impl Add for Characteristics {
@@ -178,6 +192,24 @@ impl Pawn {
             .reduce(|acc, el| acc + el)
             .unwrap_or(0);
         total_armor
+    }
+}
+
+impl Display for Pawn {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let weapon_equipped = if let Some(weapon) = self.equipped.right_hand.as_ref() {
+            weapon.name.as_str()
+        } else {
+            ""
+        };
+        let pawn_display = format!("race: {race}\nequipped: {equipped}\n{stats}\nLife: {life}\nMana: {mana}",
+                                   race = self.race,
+                                   equipped = weapon_equipped,
+                                   stats = self.characteristics.to_string(),
+                                   life = self.life.to_string(),
+                                   mana = self.mana);
+
+        f.write_str(pawn_display.as_str())
     }
 }
 

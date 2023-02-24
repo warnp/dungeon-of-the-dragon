@@ -1,8 +1,11 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender};
 use console::Term;
 use rand::random;
+use serde::{Deserialize, Serialize};
 use crate::inventory::item::{Item, ItemAttackTypeEnum, PartToEquiEnum, Pocketable};
 use crate::ai;
 use crate::pawn::pawn::Pawn;
@@ -11,9 +14,10 @@ use crate::services::interactions::Attack;
 use crate::Select;
 use crate::ColorfulTheme;
 use crate::gui::menu::Menu;
+use crate::services::messaging::MessageContent;
 
 #[warn(non_camel_case_types)]
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Actions {
     OPEN = 0,
     ATTACK,
@@ -55,7 +59,7 @@ impl Display for Actions {
 }
 
 impl Actions {
-    pub fn handle_actions(pawns: &Vec<Rc<RefCell<Pawn>>>, menu: &Menu) -> std::io::Result<()> {
+    pub fn handle_actions(pawns: &Vec<Rc<RefCell<Pawn>>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu) -> std::io::Result<()> {
         let mut pawns_iter = (&pawns).iter();
         while let Some(current_pawn) = pawns_iter.next() {
             menu.write_line(format!("{} turn.", current_pawn.clone().borrow().name).as_str())?;
@@ -80,17 +84,20 @@ impl Actions {
                 match action.into() {
                     Actions::USE => {
                         println!("USE");
-                        Ok(()) },
-                    Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, menu),
+                        Ok(())
+                    }
+                    Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, receivers, senders, menu),
                     Actions::WALK_TO => {
                         println!("WALK TO");
 
-                        Ok(()) },
+                        Ok(())
+                    }
                     Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), menu),
                     Actions::OPEN => {
                         println!("OPEN");
 
-                        Ok(()) },
+                        Ok(())
+                    }
                     Actions::EQUIP => Self::equip_item(current_pawn.clone(), menu)
                 }?;
             }
@@ -99,70 +106,103 @@ impl Actions {
         Ok(())
     }
 
-    fn watch_action(current_player: Rc<RefCell<Pawn>>, creatures: &Vec<Rc<RefCell<Pawn>>>, menu: &Menu) -> std::io::Result<()> {
-        if creatures.is_empty() {
-            menu.write_line("Nothing to see here")?;
-            return Ok(());
+    fn watch_action(current_player: Rc<RefCell<Pawn>>, creatures: &Vec<Rc<RefCell<Pawn>>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu) -> std::io::Result<()> {
+        #[cfg(feature = "graphical_mode")]
+        if current_player.clone().borrow().playable {
+            senders.get("gameplay_state").unwrap().send(MessageContent {
+                topic: "gameplay_state".to_string(),
+                content: bincode::serialize(&Actions::WATCH).unwrap(),
+            }).unwrap();
+
+            loop {
+                if let Ok(command) = receivers.get("info").unwrap().try_recv() {
+                    let (x, y): (u16, u16) = bincode::deserialize(command.content.as_slice()).unwrap();
+
+                    println!("position {}, {}", x, y);
+                    let creatures = creatures.iter()
+                        .filter(|c| c.borrow().position.y == y && c.borrow().position.x == x)
+                        .map(|el| el.clone())
+                        .collect::<Vec<Rc<RefCell<Pawn>>>>();
+
+                    let creature_watched = creatures.first().unwrap().borrow();
+
+                    let creature_stats = creature_watched.to_string();
+
+                    senders.get("info_response").unwrap().send(MessageContent {
+                        topic: "info_response".to_string(),
+                        content: creature_stats.as_str().as_bytes().to_vec(),
+                    }).unwrap();
+                    break;
+                }
+            }
         }
 
-        //TODO use perception here
-        //TODO Add item in room
-        let creatures_name = {
-            if current_player.clone().borrow().playable {
-                menu.write_line("Watch what ?")?;
-                let creatures_name = creatures.iter()
-                    .filter(|e| e.clone().borrow().life > 0 && e.clone().borrow().id != current_player.clone().borrow().id)
-                    .map(|e| e.clone().borrow().name.clone())
-                    .collect::<Vec<String>>();
-                creatures_name
-            } else {
-                vec![]
+        #[cfg(not(feature = "graphical_mode"))]
+        {
+            if creatures.is_empty() {
+                menu.write_line("Nothing to see here")?;
+                return Ok(());
             }
-        };
 
-        let selected_creature_index: Option<usize> = ai::ai::let_ai_or_human_play(current_player.clone(), move || {
-            if let Ok(result) = menu.menu(creatures_name.clone()) {
-                result
-            } else {
-                None
-            }
-        }, || {
-            let creatures_number = creatures.iter()
-                .filter(|e| {
-                    let pawn_clone = e.clone();
-                    pawn_clone.borrow().life > 0 &&
-                        pawn_clone.borrow().playable &&
-                        pawn_clone.borrow().id != current_player.clone().borrow().id
-                }).count();
-            let random_id = ((rand::random::<f32>() * creatures_number as f32) as f32).floor() as usize;
+            //TODO use perception here
+            //TODO Add item in room
+            let creatures_name = {
+                if current_player.clone().borrow().playable {
+                    menu.write_line("Watch what ?")?;
+                    let creatures_name = creatures.iter()
+                        .filter(|e| e.clone().borrow().life > 0 && e.clone().borrow().id != current_player.clone().borrow().id)
+                        .map(|e| e.clone().borrow().name.clone())
+                        .collect::<Vec<String>>();
+                    creatures_name
+                } else {
+                    vec![]
+                }
+            };
 
-            Some(random_id)
-        });
-
-        if let Some(creature_id) = selected_creature_index {
-            if current_player.clone().borrow().playable {
-                let creature = creatures.get(creature_id).unwrap();
-                menu.write_line(format!("{:#?}", creature).as_str())?;
-            } else {
-                let creatures = creatures.iter()
+            let selected_creature_index: Option<usize> = ai::ai::let_ai_or_human_play(current_player.clone(), move || {
+                if let Ok(result) = menu.menu(creatures_name.clone()) {
+                    result
+                } else {
+                    None
+                }
+            }, || {
+                let creatures_number = creatures.iter()
                     .filter(|e| {
                         let pawn_clone = e.clone();
                         pawn_clone.borrow().life > 0 &&
                             pawn_clone.borrow().playable &&
                             pawn_clone.borrow().id != current_player.clone().borrow().id
-                    })
-                    .map(|e| e.clone())
-                    .collect::<Vec<Rc<RefCell<Pawn>>>>();
-                let creature = creatures
-                    .get(creature_id)
-                    .unwrap();
+                    }).count();
+                let random_id = ((rand::random::<f32>() * creatures_number as f32) as f32).floor() as usize;
 
-                let clonned_current_player = current_player.clone();
-                menu.write_line(format!("{} is watching...", clonned_current_player.borrow().name).as_str())?;
-                let ref_mut = clonned_current_player.borrow_mut();
-                let option = ref_mut.ai.clone();
-                let mut ai = option.borrow_mut();
-                ai.as_mut().unwrap().add_target_to_watched_target(creature.clone());
+                Some(random_id)
+            });
+
+            if let Some(creature_id) = selected_creature_index {
+                if current_player.clone().borrow().playable {
+                    let creature = creatures.get(creature_id).unwrap();
+                    menu.write_line(format!("{:#?}", creature).as_str())?;
+                } else {
+                    let creatures = creatures.iter()
+                        .filter(|e| {
+                            let pawn_clone = e.clone();
+                            pawn_clone.borrow().life > 0 &&
+                                pawn_clone.borrow().playable &&
+                                pawn_clone.borrow().id != current_player.clone().borrow().id
+                        })
+                        .map(|e| e.clone())
+                        .collect::<Vec<Rc<RefCell<Pawn>>>>();
+                    let creature = creatures
+                        .get(creature_id)
+                        .unwrap();
+
+                    let clonned_current_player = current_player.clone();
+                    menu.write_line(format!("{} is watching...", clonned_current_player.borrow().name).as_str())?;
+                    let ref_mut = clonned_current_player.borrow_mut();
+                    let option = ref_mut.ai.clone();
+                    let mut ai = option.borrow_mut();
+                    ai.as_mut().unwrap().add_target_to_watched_target(creature.clone());
+                }
             }
         }
 
@@ -327,8 +367,8 @@ impl Actions {
             menu.write_line(format!("{} inflict {} to {}", player_clone.borrow().name, damages_dealt, selected_creature.clone().borrow().name).as_str())?;
         } else {
             menu.write_line(format!("{} cannot inflict damage to {}",
-                                      player.clone().borrow().name,
-                                      selected_creature.clone().borrow().name).as_str())?;
+                                    player.clone().borrow().name,
+                                    selected_creature.clone().borrow().name).as_str())?;
         }
 
         Ok(())

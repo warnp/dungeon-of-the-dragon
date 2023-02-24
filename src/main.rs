@@ -37,6 +37,7 @@ fn main() {
     let mut messenger_gameplay_receiver = HashMap::new();
     messenger_gameplay_sender.insert("sprite".to_string(), messaging.create_topic());
     messenger_gameplay_sender.insert("info_response".to_string(), messaging.create_topic());
+    messenger_gameplay_sender.insert("gameplay_state".to_string(), messaging.create_topic());
     messenger_gameplay_receiver.insert("info".to_string(), messaging.subscribe_to_topic("info".to_string()));
 
     let mut messenger_ui_map_receiver = HashMap::new();
@@ -47,6 +48,7 @@ fn main() {
     messenger_ui_map_receiver.insert("select".to_string(), messaging.subscribe_to_topic("select".to_string()));
     messenger_ui_map_receiver.insert("clear".to_string(), messaging.subscribe_to_topic("clear".to_string()));
     messenger_ui_map_receiver.insert("info_response".to_string(), messaging.subscribe_to_topic("info_response".to_string()));
+    messenger_ui_map_receiver.insert("gameplay_state".to_string(), messaging.subscribe_to_topic("gameplay_state".to_string()));
     messenger_ui_map_sender.insert("select_response".to_string(), messaging.create_topic());
     messenger_ui_map_sender.insert("info".to_string(), messaging.create_topic());
 

@@ -16,7 +16,7 @@ use crate::services::messaging::MessageContent;
 pub struct GameLoop {}
 
 impl GameLoop {
-    pub fn iterate(senders: HashMap<String, Sender<MessageContent>>, mut receivers: HashMap<String, Receiver<MessageContent>>, menu: Menu) {
+    pub fn iterate(senders: HashMap<String, Sender<MessageContent>>, receivers: HashMap<String, Receiver<MessageContent>>, menu: Menu) {
         thread::spawn(move || {
             let menu = menu;
             let spells = Initializer::generate_spells();
@@ -48,29 +48,16 @@ impl GameLoop {
             let weather_list = Initializer::init_weather();
             let world = Initializer::init(&weather_list, player1.clone(), &mut items);
 
-            let world_clone = Arc::new(&world);
-            let toto = world_clone.clone();
-            let (_,x) = receivers.remove_entry("info").unwrap();
-            thread::spawn(move || {
-                loop {
-                    if let Ok(info) = x.try_recv() {
-                        let x1: (f32,f32) = bincode::deserialize(info.content.as_slice()).unwrap();
-                        println!("info {:?}", x1);
-                        let rooms = toto.places.get(0).unwrap().room;
-
-                    }
-
-                }
-
-            });
-
 
             //Travel threw places
-            GameLoop::loop_handler(&world, senders, &menu).unwrap();
+            GameLoop::loop_handler(&world, senders, receivers,&menu).unwrap();
         });
     }
 
-    fn loop_handler(world: &World, senders: HashMap<String, Sender<MessageContent>>, menu: &Menu) -> std::io::Result<()> {
+    fn loop_handler(world: &World,
+                    senders: HashMap<String, Sender<MessageContent>>,
+                    receivers: HashMap<String, Receiver<MessageContent>>,
+                    menu: &Menu) -> std::io::Result<()> {
         let senders = senders;
         loop {
             let world_current_place = world.places.get(0).unwrap();
@@ -119,7 +106,7 @@ impl GameLoop {
                                         creatures.join(", ")
                 ).as_str())?;
 
-                Actions::handle_actions(&Self::order_pawns(pawns)?, menu)?;
+                Actions::handle_actions(&Self::order_pawns(pawns)?, &receivers,&senders,menu)?;
 
                 menu.clear_line()?;
 

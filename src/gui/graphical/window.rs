@@ -9,6 +9,7 @@ use ggez::event::MouseButton;
 use ggez::glam::Vec2;
 use ggez::graphics::{Canvas, Color, DrawMode, DrawParam, Image, Mesh, Rect, Text};
 use crate::gui::graphical::sprite::{Layer, Sprite};
+use crate::interact::actions::Actions;
 use crate::services::messaging::MessageContent;
 
 const SPRITE_SIZE: i32 = 32;
@@ -27,7 +28,8 @@ pub struct MainState {
     menu_to_show: Vec<((f32, f32), Vec<String>)>,
     menu_buttons: Vec<Rect>,
     selected_menu_option: Option<usize>,
-    active_modal: Option<(f32,f32)>
+    active_modal: Option<(f32, f32, String)>,
+    gameplay_state: Actions
 }
 
 impl Default for MainState {
@@ -46,7 +48,8 @@ impl Default for MainState {
             menu_to_show: vec![],
             menu_buttons: vec![],
             selected_menu_option: None,
-            active_modal: None
+            active_modal: None,
+            gameplay_state: Actions::ATTACK
         }
     }
 }
@@ -116,12 +119,18 @@ impl MainState {
         Ok(())
     }
 
-    fn draw_modal(&mut self, canvas: &mut Canvas, x: f32, y: f32) -> GameResult<()> {
+    fn draw_modal(&mut self, canvas: &mut Canvas, x: f32, y: f32, content: &str) -> GameResult<()> {
         canvas.draw(self.sprites_textures.get(&(0 as u8))
                         .unwrap(),
                     DrawParam::new()
                         .dest(Vec2::new(x, y))
                         .scale(Vec2::new(5f32, 5f32)));
+
+        canvas.draw(&Text::new(content),
+                    graphics::DrawParam::from([x, y])
+                        .color(Color::WHITE)
+                        .scale(Vec2::new(1., 1.))
+                        .dest(Vec2::new(x + 10., y + 10.)));
         Ok(())
     }
 
@@ -132,14 +141,35 @@ impl MainState {
             .map(|e| e.clone())
             .collect::<Vec<Sprite>>();
 
+
+        if let Ok(state_content) = self.receivers.get("gameplay_state").unwrap().try_recv() {
+            let state: Actions = bincode::deserialize(state_content.content.as_slice()).unwrap();
+            if state == Actions::WATCH {
+                self.watch_action(&x, &y, sprites)
+            }
+        }
+
+
+    }
+
+    fn watch_action(&mut self, x: &f32, y: &f32, sprites: Vec<Sprite>) {
         self.senders.get("info").unwrap().send(MessageContent {
             topic: "info".to_string(),
-            content: bincode::serialize(&(x, y)).unwrap(),
+            content: bincode::serialize(&((x / SPRITE_SIZE as f32).floor() as u16, (y / SPRITE_SIZE as f32).floor() as u16)).unwrap(),
         }).unwrap();
 
+        let hovering_info = {
+            loop {
+                if let Ok(response) = self.receivers.get("info_response").unwrap().try_recv() {
+                    break format!("{}", from_utf8(response.content.as_slice()).unwrap());
+                }
+            }
+        };
+
+        println!("hovering {}", hovering_info);
         self.active_modal = {
             if sprites.is_empty().not() {
-                Some((x, y))
+                Some((x.clone(), y.clone(), hovering_info.to_string()))
             } else {
                 None
             }
@@ -148,15 +178,11 @@ impl MainState {
 }
 
 impl event::EventHandler<ggez::GameError> for MainState {
-    fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) -> Result<(), GameError> {
-        self.mouse_hovering_characterisation(x, y);
-        Ok(())
-    }
-
     fn mouse_button_up_event(&mut self, _ctx: &mut Context, button: MouseButton, x: f32, y: f32) -> Result<(), GameError> {
         if button != MouseButton::Left {
             return Ok(());
         }
+
 
         let button_clicked = self.menu_buttons.iter()
             .filter(|b| b.x < x && b.x + b.w > x &&
@@ -186,7 +212,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
 
         //We check if user has clicked on something interactable and if interactions are availables
         if sprites_selected.len() > 0 {
-            todo!()
+            self.mouse_hovering_characterisation(x, y);
         }
 
 
@@ -282,8 +308,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
         canvas.draw(&Text::new(self.stdout.clone()),
                     graphics::DrawParam::from(Vec2::new(200.0, 0.0)).color(Color::WHITE).scale(Vec2::new(1., 1.)));
 
-        if let Some((x,y)) = self.active_modal {
-            self.draw_modal(&mut canvas, x, y)?;
+        if let Some((x, y, content)) = self.active_modal.clone() {
+            self.draw_modal(&mut canvas, x, y, content.as_str())?;
         }
 
         canvas.draw(&self.mouse.get_mesh(&ctx), Vec2::new(0.0, 0.0));

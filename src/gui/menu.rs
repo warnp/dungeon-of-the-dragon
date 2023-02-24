@@ -52,10 +52,8 @@ impl Menu {
 
             loop {
                 if let Ok(command) = self.selected_option.try_recv() {
-                    if "select_response" == command.topic.as_str() {
-                        let ok = Ok(Some(bincode::deserialize(command.content.as_slice()).unwrap()));
-                        return ok;
-                    }
+                    let ok = Ok(Some(bincode::deserialize(command.content.as_slice()).unwrap()));
+                    return ok;
                 }
             }
         }
