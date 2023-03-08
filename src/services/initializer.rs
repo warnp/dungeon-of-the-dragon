@@ -101,6 +101,7 @@ impl Initializer {
             part_to_equip: PartToEquiEnum::RIGHT_HAND,
             armor_point: 0,
             attack_type: Some(ItemAttackTypeEnum::CONTACT),
+            range: Some(1)
         },
             Item {
                 name: "Basic wood club".to_string(),
@@ -119,6 +120,7 @@ impl Initializer {
                 part_to_equip: PartToEquiEnum::RIGHT_HAND,
                 armor_point: 0,
                 attack_type: Some(ItemAttackTypeEnum::CONTACT),
+                range: Some(1)
             }
         ]
     }
@@ -180,6 +182,7 @@ impl Initializer {
             power_up: None,
             damages_type: Some(DamageTypeEnum::FIRE),
             attack_type: Some(ItemAttackTypeEnum::MAGIC),
+            range: Some(5)
         })]
     }
 }

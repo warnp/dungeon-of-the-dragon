@@ -1,7 +1,8 @@
 use std::fmt::{Display, Formatter};
+use serde::{Deserialize, Serialize};
 use crate::pawn::pawn::Characteristics;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DamageTypeEnum {
     PIERCING,
     SLASHING,
@@ -26,7 +27,93 @@ pub trait Pocketable {
 
     fn get_name(&self) -> &str;
 
-    fn calculate_usability(&self, pawn_charac: &Characteristics, mana: Option<u8>) -> u8;
+    fn get_requirements(&self) -> &Characteristics;
+
+    fn calculate_usability(&self, pawn_charac: &Characteristics, mana: Option<u8>) -> u8 {
+        let adjustment_value = 2;
+        let mut result = 0;
+
+        let requirements = self.get_requirements();
+        let charisma = requirements.charisma;
+        if charisma > 0 {
+            if charisma < pawn_charac.charisma {
+                if charisma + adjustment_value < pawn_charac.charisma {
+                    result = 255;
+                } else {
+                    result = 127;
+                }
+            } else {
+                return 0;
+            }
+        }
+
+        let intelligence = requirements.intelligence;
+        if intelligence > 0 {
+            if intelligence < pawn_charac.intelligence {
+                if intelligence + adjustment_value < pawn_charac.intelligence {
+                    result = 255;
+                } else {
+                    result = 127;
+                }
+            } else {
+                return 0;
+            }
+        }
+
+        let willpower = requirements.willpower;
+        if willpower > 0 {
+            if willpower < pawn_charac.willpower {
+                if willpower + adjustment_value < pawn_charac.willpower {
+                    result = 255;
+                } else {
+                    result = 127;
+                }
+            } else {
+                return 0;
+            }
+        }
+
+        let force = requirements.force;
+        if force > 0 {
+            if force < pawn_charac.force {
+                if force + adjustment_value < pawn_charac.force {
+                    result = 255;
+                } else {
+                    result = 127;
+                }
+            } else {
+                return 0;
+            }
+        }
+
+        let dexterity = requirements.dexterity;
+        if dexterity > 0 {
+            if dexterity < pawn_charac.dexterity {
+                if dexterity + adjustment_value < pawn_charac.dexterity {
+                    result = 255;
+                } else {
+                    result = 127;
+                }
+            } else {
+                return 0;
+            }
+        }
+
+        let constitution = requirements.constitution;
+        if constitution > 0 {
+            if constitution < pawn_charac.constitution {
+                if constitution + adjustment_value < pawn_charac.constitution {
+                    result = 255;
+                } else {
+                    result = 127;
+                }
+            } else {
+                return 0;
+            }
+        }
+
+        result
+    }
 
     fn get_power_up(&self) -> &Option<Characteristics>;
 
@@ -64,7 +151,8 @@ pub struct Item {
     pub damages_type: Option<DamageTypeEnum>,
     pub part_to_equip: PartToEquiEnum,
     pub armor_point: u8,
-    pub attack_type: Option<ItemAttackTypeEnum>
+    pub attack_type: Option<ItemAttackTypeEnum>,
+    pub range: Option<u8>
 }
 
 #[derive(Debug, Clone)]
@@ -78,8 +166,8 @@ pub struct Spell {
     pub resistances: Option<DamageTypeEnum>,
     pub power_up: Option<Characteristics>,
     pub damages_type: Option<DamageTypeEnum>,
-    pub attack_type: Option<ItemAttackTypeEnum>
-
+    pub attack_type: Option<ItemAttackTypeEnum>,
+    pub range: Option<u8>
 }
 
 impl Pocketable for Item {
@@ -96,83 +184,8 @@ impl Pocketable for Item {
         &self.name
     }
 
-    fn calculate_usability(&self, pawn_charac: &Characteristics, _mana: Option<u8>) -> u8 {
-        let adjustment_value = 2;
-        let mut result = 0;
-
-        if self.requirements.charisma > 0 {
-            if self.requirements.charisma < pawn_charac.charisma {
-                if self.requirements.charisma + adjustment_value < pawn_charac.charisma {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.intelligence > 0 {
-            if self.requirements.intelligence < pawn_charac.intelligence {
-                if self.requirements.intelligence + adjustment_value < pawn_charac.intelligence {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.willpower > 0 {
-            if self.requirements.willpower < pawn_charac.willpower {
-                if self.requirements.willpower + adjustment_value < pawn_charac.willpower {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.force > 0 {
-            if self.requirements.force < pawn_charac.force {
-                if self.requirements.force + adjustment_value < pawn_charac.force {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.dexterity > 0 {
-            if self.requirements.dexterity < pawn_charac.dexterity {
-                if self.requirements.dexterity + adjustment_value < pawn_charac.dexterity {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.constitution > 0 {
-            if self.requirements.constitution < pawn_charac.constitution {
-                if self.requirements.constitution + adjustment_value < pawn_charac.constitution {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        result
+    fn get_requirements(&self) -> &Characteristics {
+        &self.requirements
     }
 
     fn get_power_up(&self) -> &Option<Characteristics> {
@@ -210,93 +223,6 @@ impl Pocketable for Spell {
         &self.name
     }
 
-    fn calculate_usability(&self, pawn_charac: &Characteristics, mana: Option<u8>) -> u8 {
-        let adjustment_value = 2;
-        let mut result = 0;
-
-        if let Some(m) = mana {
-            if m < self.mana {
-                return 0;
-            }
-        } else {
-            return 0;
-        }
-
-        if self.requirements.charisma > 0 {
-            if self.requirements.charisma < pawn_charac.charisma {
-                if self.requirements.charisma + adjustment_value < pawn_charac.charisma {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.intelligence > 0 {
-            if self.requirements.intelligence < pawn_charac.intelligence {
-                if self.requirements.intelligence + adjustment_value < pawn_charac.intelligence {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.willpower > 0 {
-            if self.requirements.willpower < pawn_charac.willpower {
-                if self.requirements.willpower + adjustment_value < pawn_charac.willpower {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.force > 0 {
-            if self.requirements.force < pawn_charac.force {
-                if self.requirements.force + adjustment_value < pawn_charac.force {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.dexterity > 0 {
-            if self.requirements.dexterity < pawn_charac.dexterity {
-                if self.requirements.dexterity + adjustment_value < pawn_charac.dexterity {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        if self.requirements.constitution > 0 {
-            if self.requirements.constitution < pawn_charac.constitution {
-                if self.requirements.constitution + adjustment_value < pawn_charac.constitution {
-                    result = 255;
-                } else {
-                    result = 127;
-                }
-            } else {
-                return 0;
-            }
-        }
-
-        result
-    }
-
     fn get_power_up(&self) -> &Option<Characteristics> {
         &self.power_up
     }
@@ -309,5 +235,8 @@ impl Pocketable for Spell {
         self.attack_type.clone()
     }
 
+    fn get_requirements(&self) -> &Characteristics {
+        &self.requirements
+    }
 }
 

@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-use std::sync::{Arc, mpsc, Mutex};
+use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
-use std::thread::JoinHandle;
 
 #[derive(Clone, Default, Debug)]
 pub struct MessageContent {

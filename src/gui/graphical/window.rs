@@ -2,14 +2,19 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Not;
 use std::str::from_utf8;
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::{Duration, Instant};
 use ggez::{event, GameError, graphics};
 use ggez::{Context, GameResult};
 use ggez::conf::{NumSamples, WindowMode, WindowSetup};
 use ggez::event::MouseButton;
 use ggez::glam::Vec2;
 use ggez::graphics::{Canvas, Color, DrawMode, DrawParam, Image, Mesh, Rect, Text};
+use keyframe::{AnimationSequence, functions, keyframes};
+use keyframe_derive::CanTween;
 use crate::gui::graphical::sprite::{Layer, Sprite};
 use crate::interact::actions::Actions;
+use crate::inventory::item::{DamageTypeEnum, ItemAttackTypeEnum};
+use crate::services::animator::Animator;
 use crate::services::messaging::MessageContent;
 
 const SPRITE_SIZE: i32 = 32;
@@ -18,6 +23,8 @@ pub struct MainState {
     sprites_movables: Vec<(Image, DrawParam)>,
     sprites_background: Vec<(Image, DrawParam)>,
     sprites_ui: Vec<(Image, DrawParam)>,
+    particles: Vec<(Image, DrawParam, Instant, u8)>,
+    animation_duration: u64,
     mouse: Mouse,
     receivers: HashMap<String, Receiver<MessageContent>>,
     senders: HashMap<String, Sender<MessageContent>>,
@@ -29,15 +36,21 @@ pub struct MainState {
     menu_buttons: Vec<Rect>,
     selected_menu_option: Option<usize>,
     active_modal: Option<(f32, f32, String)>,
-    gameplay_state: Actions
+    gameplay_state: Option<Actions>,
+    sprites_clicked: Vec<(f32, f32, Sprite)>,
+    animator: Animator,
 }
 
 impl Default for MainState {
     fn default() -> Self {
+
+
         MainState {
             sprites_movables: vec![],
             sprites_background: vec![],
             sprites_ui: vec![],
+            particles: vec![],
+            animation_duration: 1,
             mouse: Default::default(),
             receivers: HashMap::new(),
             senders: HashMap::new(),
@@ -49,7 +62,9 @@ impl Default for MainState {
             menu_buttons: vec![],
             selected_menu_option: None,
             active_modal: None,
-            gameplay_state: Actions::ATTACK
+            gameplay_state: None,
+            sprites_clicked: vec![],
+            animator: Animator::new(),
         }
     }
 }
@@ -80,9 +95,12 @@ impl MainState {
 
         let mut textures = BTreeMap::new();
         textures.insert(0, Image::from_path(ctx, "/menu_background.png").unwrap());
+        textures.insert(1, Image::from_path(ctx, "/selector.png").unwrap());
+        textures.insert(2, Image::from_path(ctx, "/possible_area.png").unwrap());
         textures.insert(10, Image::from_path(ctx, "/dungeon_ground.png").unwrap());
-        textures.insert(11, Image::from_path(ctx, "/dungeon_ground.png").unwrap());
-        textures.insert(12, Image::from_path(ctx, "/dungeon_ground.png").unwrap());
+        textures.insert(11, Image::from_path(ctx, "/door.png").unwrap());
+        textures.insert(12, Image::from_path(ctx, "/door.png").unwrap());
+        textures.insert(100, Image::from_path(ctx, "/particles.png").unwrap());
         textures.insert(200, Image::from_path(ctx, "/warrior.png").unwrap());
         textures.insert(201, Image::from_path(ctx, "/goblin.png").unwrap());
 
@@ -124,7 +142,7 @@ impl MainState {
                         .unwrap(),
                     DrawParam::new()
                         .dest(Vec2::new(x, y))
-                        .scale(Vec2::new(5f32, 5f32)));
+                        .scale(Vec2::new(7.5f32, 6.5f32)));
 
         canvas.draw(&Text::new(content),
                     graphics::DrawParam::from([x, y])
@@ -134,48 +152,126 @@ impl MainState {
         Ok(())
     }
 
-    fn mouse_hovering_characterisation(&mut self, x: f32, y: f32) {
-        let sprites = self.sprites.iter()
-            .filter(|s| s.pos_y * SPRITE_SIZE < y as i32 && s.pos_y * SPRITE_SIZE + SPRITE_SIZE > y as i32 &&
-                s.pos_x * SPRITE_SIZE < x as i32 && s.pos_x * SPRITE_SIZE + SPRITE_SIZE > x as i32)
-            .map(|e| e.clone())
-            .collect::<Vec<Sprite>>();
-
-
-        if let Ok(state_content) = self.receivers.get("gameplay_state").unwrap().try_recv() {
-            let state: Actions = bincode::deserialize(state_content.content.as_slice()).unwrap();
-            if state == Actions::WATCH {
-                self.watch_action(&x, &y, sprites)
+    fn mouse_hovering_characterisation(&mut self, x: f32, y: f32, sprites: Vec<Sprite>) {
+        if let Some(gameplay_state) = self.gameplay_state.clone() {
+            match gameplay_state {
+                Actions::WATCH => self.watch_action(&x, &y, sprites),
+                Actions::ATTACK => self.attack_action(&x, &y, sprites),
+                _ => ()
             }
         }
-
-
     }
 
-    fn watch_action(&mut self, x: &f32, y: &f32, sprites: Vec<Sprite>) {
+    fn set_gameplay_state(&mut self) {
+        if let Ok(state_content) = self.receivers.get("gameplay_state").unwrap().try_recv() {
+            self.gameplay_state = Some(bincode::deserialize(state_content.content.as_slice()).unwrap());
+        }
+    }
+
+    fn attack_action(&mut self, x: &f32, y: &f32, sprites: Vec<Sprite>) {
+        //Send click position info
+        self.send_info_message(&x, &y);
+    }
+
+    fn send_info_message(&mut self, x: &f32, y: &f32) {
         self.senders.get("info").unwrap().send(MessageContent {
             topic: "info".to_string(),
             content: bincode::serialize(&((x / SPRITE_SIZE as f32).floor() as u16, (y / SPRITE_SIZE as f32).floor() as u16)).unwrap(),
         }).unwrap();
+    }
 
-        let hovering_info = {
-            loop {
-                if let Ok(response) = self.receivers.get("info_response").unwrap().try_recv() {
-                    break format!("{}", from_utf8(response.content.as_slice()).unwrap());
-                }
-            }
+    fn watch_action(&mut self, x: &f32, y: &f32, sprites: Vec<Sprite>) {
+        //Send click position info
+        self.send_info_message(&x, &y);
+        self.sprites_clicked = sprites.iter()
+            .map(|s| (x.clone(), y.clone(), s.clone()))
+            .collect::<Vec<(f32, f32, Sprite)>>();
+    }
+
+    fn get_all_targetables_cell_to_sprites(&self) -> Vec<Sprite> {
+        //Get all targetables cells
+        let targetables_receiver = self.receivers.get("targetable").unwrap();
+        let targetable_coordinates: Vec<Vec<bool>> = if let Ok(targetable) = targetables_receiver.try_recv() {
+            bincode::deserialize(targetable.content.as_slice()).unwrap()
+        } else {
+            Vec::new()
         };
+        targetable_coordinates.iter()
+            .enumerate()
+            .flat_map(|(y, row)| {
+                row.iter().enumerate()
+                    .filter(|(x, &cell)| cell)
+                    .map(|(x, &cell)|
+                        Sprite::new(2, x as i32, y as i32, Layer::UI)
+                    )
+                    .collect::<Vec<Sprite>>()
+            })
+            .collect::<Vec<Sprite>>()
+    }
 
-        println!("hovering {}", hovering_info);
-        self.active_modal = {
-            if sprites.is_empty().not() {
-                Some((x.clone(), y.clone(), hovering_info.to_string()))
+    fn wait_for_watch(&mut self) {
+        let hovering_info =
+            if let Ok(response) = self.receivers.get("info_response").unwrap().try_recv() {
+                Some(format!("{}", from_utf8(response.content.as_slice()).unwrap()))
             } else {
                 None
+            };
+
+        if let Some(info) = hovering_info {
+            self.active_modal = {
+                if self.sprites_clicked.is_empty().not() {
+                    let first_element = self.sprites_clicked.first().unwrap();
+                    Some((first_element.0.clone(), first_element.1.clone(), info.to_string()))
+                } else {
+                    None
+                }
+            };
+
+            self.clear_after_turn();
+        }
+    }
+
+    fn clear_after_turn(&mut self) {
+        self.sprites_clicked.clear();
+        self.sprites_ui.clear();
+        self.gameplay_state = None;
+    }
+
+    fn wait_for_attack(&mut self) {
+        if let Ok(response) = self.receivers.get("info_response").unwrap().try_recv() {
+            if let Ok(ending_attack_turn) = from_utf8( response.content.as_slice()) {
+                if ending_attack_turn == "end_attack" {
+                    self.clear_after_turn();
+                    return;
+                }
             }
+            if let Ok(target_position) = bincode::deserialize::<((u16, u16), DamageTypeEnum)>(response.content.as_slice()) {
+
+                let sprite = Sprite::new(1, target_position.0.0 as i32, target_position.0.1 as i32, Layer::UI);
+                self.sprites_ui.append(&mut vec![sprite.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures)]);
+                let attack_particle = Sprite::new(100, target_position.0.0 as i32, target_position.0.1 as i32, Layer::PARTICLE)
+                    .create_drawable(SPRITE_SIZE as f32, &self.sprites_textures);
+
+                let damage_type = match target_position.1 {
+                    DamageTypeEnum::SLASHING => 1,
+                    DamageTypeEnum::FIRE => 0,
+                    _ => 0
+                };
+
+                self.particles.push((attack_particle.0, attack_particle.1, Instant::now(), damage_type));
+            }
+        } else {
+            let mut targetable_cells = self.get_all_targetables_cell_to_sprites();
+            self.sprites_ui.append(&mut targetable_cells.iter()
+                .filter(|s| s.layer == Layer::UI)
+                .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
+                .collect::<Vec<(Image, DrawParam)>>());
+
+            self.sprites.append(&mut targetable_cells);
         }
     }
 }
+
 
 impl event::EventHandler<ggez::GameError> for MainState {
     fn mouse_button_up_event(&mut self, _ctx: &mut Context, button: MouseButton, x: f32, y: f32) -> Result<(), GameError> {
@@ -183,6 +279,16 @@ impl event::EventHandler<ggez::GameError> for MainState {
             return Ok(());
         }
 
+        //If some modal exist, we close it on click
+        if let Some(a_m) = self.active_modal.clone() {
+            self.senders.get("info").unwrap().send(MessageContent {
+                topic: "info".to_string(),
+                content: vec![],
+            }).unwrap();
+
+            self.active_modal = None;
+            return Ok(());
+        }
 
         let button_clicked = self.menu_buttons.iter()
             .filter(|b| b.x < x && b.x + b.w > x &&
@@ -211,8 +317,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
             .collect::<Vec<Sprite>>();
 
         //We check if user has clicked on something interactable and if interactions are availables
-        if sprites_selected.len() > 0 {
-            self.mouse_hovering_characterisation(x, y);
+        if !sprites_selected.is_empty() {
+            self.mouse_hovering_characterisation(x, y, sprites_selected);
         }
 
 
@@ -221,6 +327,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
 
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         let point2 = ctx.mouse.position();
+        self.set_gameplay_state();
 
         if let Some(clear_container) = self.receivers.get("clear") {
             if let Ok(clear) = clear_container.try_recv() {
@@ -232,7 +339,6 @@ impl event::EventHandler<ggez::GameError> for MainState {
         if let Some(stdout_container) = self.receivers.get("stdout") {
             if let Ok(text) = stdout_container.try_recv() {
                 let out = format!("{}\n{}", self.stdout, from_utf8(text.content.as_slice()).unwrap());
-                println!("out : {}", out);
                 self.stdout = out;
             }
         }
@@ -251,40 +357,49 @@ impl event::EventHandler<ggez::GameError> for MainState {
         //Get sprites
         if let Some(receiver) = self.receivers.get("sprite") {
             if let Ok(sprites) = receiver.try_recv() {
-                let image_creation = |s: &Sprite| {
-                    let param = DrawParam::new().dest(Vec2::new((s.pos_x * SPRITE_SIZE) as f32, (s.pos_y * SPRITE_SIZE) as f32));
-                    (self.sprites_textures.get(&s.texture_id).unwrap().clone(), param)
-                };
-
                 let sprites: Vec<Sprite> = bincode::deserialize(sprites.content.as_slice()).unwrap();
 
                 self.sprites_movables = sprites.iter()
                     .filter(|s| s.layer == Layer::MOVABLES)
-                    .map(image_creation)
+                    .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
                     .collect::<Vec<(Image, DrawParam)>>();
 
                 self.sprites_background = sprites.iter()
                     .filter(|s| s.layer == Layer::BACKGROUND)
-                    .map(image_creation)
+                    .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
                     .collect::<Vec<(Image, DrawParam)>>();
 
-                // self.sprites_ui = sprites.iter()
-                //     .filter(|s| s.layer == Layer::UI)
-                //     .map(image_creation)
-                //     .collect::<Vec<(Image, DrawParam)>>();
+                self.sprites_ui = sprites.iter()
+                    .filter(|s| s.layer == Layer::UI)
+                    .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
+                    .collect::<Vec<(Image, DrawParam)>>();
 
                 self.sprites = sprites
             }
         }
 
+        if let Some(state) = self.gameplay_state.clone() {
+            match state {
+                Actions::OPEN => {}
+                Actions::ATTACK => self.wait_for_attack(),
+                Actions::WALK_TO => {}
+                Actions::WATCH => self.wait_for_watch(),
+                Actions::USE => {}
+                Actions::EQUIP => {}
+            }
+        }
+
         self.mouse.set_pointer_position(point2.x, point2.y);
+        self.animator.advance(1., ctx.time.delta().as_secs_f64());
+
+        self.particles.retain(|p: &(Image,DrawParam, Instant, u8)|  p.2.elapsed() < Duration::new(self.animation_duration as u64,0));
 
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let fps = ctx.time.fps();
-        ctx.gfx.set_window_title(format!("fps: {}", fps).as_str());
+        ctx.gfx.set_window_title(format!("fps: {0:.0}", fps).as_str());
         let mut canvas = Canvas::from_frame(
             ctx,
             graphics::Color::from([0., 0., 0., 1.0]),
@@ -295,6 +410,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
         }
         for mesh in &self.sprites_movables {
             canvas.draw(&mesh.0, mesh.1);
+        }
+        for particle in &self.particles {
+            let mut local_clone = particle.clone();
+            canvas.draw(&particle.0, local_clone.1
+                .src(self.animator.get_currenct_rect(local_clone.3 as usize)));
         }
         for mesh in &self.sprites_ui {
             canvas.draw(&mesh.0, mesh.1);
@@ -313,6 +433,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
         }
 
         canvas.draw(&self.mouse.get_mesh(&ctx), Vec2::new(0.0, 0.0));
+
 
         canvas.finish(ctx)?;
         Ok(())

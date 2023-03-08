@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
@@ -6,18 +6,21 @@ use std::sync::mpsc::{Receiver, Sender};
 use console::Term;
 use rand::random;
 use serde::{Deserialize, Serialize};
-use crate::inventory::item::{Item, ItemAttackTypeEnum, PartToEquiEnum, Pocketable};
+use crate::inventory::item::{DamageTypeEnum, Item, ItemAttackTypeEnum, PartToEquiEnum, Pocketable};
 use crate::ai;
-use crate::pawn::pawn::Pawn;
+use crate::ai::ai::let_ai_or_human_play;
+use crate::pawn::pawn::{Pawn, Position};
 use crate::services::dice::RollDiceResult;
 use crate::services::interactions::Attack;
 use crate::Select;
 use crate::ColorfulTheme;
+use crate::environment::world::{Place, World};
 use crate::gui::menu::Menu;
+use crate::services::a_star::calculate_range;
 use crate::services::messaging::MessageContent;
 
 #[warn(non_camel_case_types)]
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Actions {
     OPEN = 0,
     ATTACK,
@@ -59,7 +62,11 @@ impl Display for Actions {
 }
 
 impl Actions {
-    pub fn handle_actions(pawns: &Vec<Rc<RefCell<Pawn>>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu) -> std::io::Result<()> {
+    pub fn handle_actions(pawns: &Vec<Rc<RefCell<Pawn>>>,
+                          world: &World,
+                          receivers: &HashMap<String, Receiver<MessageContent>>,
+                          senders: &HashMap<String, Sender<MessageContent>>,
+                          menu: &Menu) -> std::io::Result<()> {
         let mut pawns_iter = (&pawns).iter();
         while let Some(current_pawn) = pawns_iter.next() {
             menu.write_line(format!("{} turn.", current_pawn.clone().borrow().name).as_str())?;
@@ -80,19 +87,22 @@ impl Actions {
                                                            None
                                                        });
 
+            let graphical_mode = false;
+            #[cfg(feature = "graphical_mode")] let graphical_mode = true;
+
             if let Some(action) = actions {
                 match action.into() {
                     Actions::USE => {
                         println!("USE");
                         Ok(())
                     }
-                    Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, receivers, senders, menu),
+                    Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, world, receivers, senders, menu, graphical_mode),
                     Actions::WALK_TO => {
                         println!("WALK TO");
 
                         Ok(())
                     }
-                    Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), menu),
+                    Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), senders, receivers, menu, &world.places.get(0).unwrap().room, graphical_mode),
                     Actions::OPEN => {
                         println!("OPEN");
 
@@ -106,7 +116,13 @@ impl Actions {
         Ok(())
     }
 
-    fn watch_action(current_player: Rc<RefCell<Pawn>>, creatures: &Vec<Rc<RefCell<Pawn>>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu) -> std::io::Result<()> {
+    fn watch_action(current_player: Rc<RefCell<Pawn>>,
+                    creatures: &Vec<Rc<RefCell<Pawn>>>,
+                    world: &World,
+                    receivers: &HashMap<String, Receiver<MessageContent>>,
+                    senders: &HashMap<String, Sender<MessageContent>>,
+                    menu: &Menu,
+                    graphical_mode: bool) -> std::io::Result<()> {
         #[cfg(feature = "graphical_mode")]
         if current_player.clone().borrow().playable {
             senders.get("gameplay_state").unwrap().send(MessageContent {
@@ -124,21 +140,44 @@ impl Actions {
                         .map(|el| el.clone())
                         .collect::<Vec<Rc<RefCell<Pawn>>>>();
 
-                    let creature_watched = creatures.first().unwrap().borrow();
+                    if let Some(creature_watched) = creatures.first() {
+                        let creature_watched = creature_watched.clone();
+                        let creature_stats = current_player.clone().borrow().try_watch(creature_watched);
 
-                    let creature_stats = creature_watched.to_string();
+                        senders.get("info_response").unwrap().send(MessageContent {
+                            topic: "info_response".to_string(),
+                            content: creature_stats.as_str().as_bytes().to_vec(),
+                        }).unwrap();
+                    } else {
+                        let place: &Place = world.places.get(0).unwrap();
+                        let tile_spec = place.room.get(y as usize)
+                            .unwrap()
+                            .get(x as usize)
+                            .unwrap();
 
-                    senders.get("info_response").unwrap().send(MessageContent {
-                        topic: "info_response".to_string(),
-                        content: creature_stats.as_str().as_bytes().to_vec(),
-                    }).unwrap();
+                        let tile_info = match tile_spec {
+                            10 => "Simple floor",
+                            11 => "Path to First room",
+                            12 => "Path to Second room",
+                            _ => ""
+                        };
+
+                        senders.get("info_response").unwrap().send(MessageContent {
+                            topic: "info_response".to_string(),
+                            content: tile_info.as_bytes().to_vec(),
+                        }).unwrap();
+                    }
+                    loop {
+                        if let Ok(command) = receivers.get("info").unwrap().try_recv() {
+                            break;
+                        }
+                    }
                     break;
                 }
             }
         }
 
-        #[cfg(not(feature = "graphical_mode"))]
-        {
+        if !graphical_mode || !current_player.clone().borrow().playable {
             if creatures.is_empty() {
                 menu.write_line("Nothing to see here")?;
                 return Ok(());
@@ -150,7 +189,8 @@ impl Actions {
                 if current_player.clone().borrow().playable {
                     menu.write_line("Watch what ?")?;
                     let creatures_name = creatures.iter()
-                        .filter(|e| e.clone().borrow().life > 0 && e.clone().borrow().id != current_player.clone().borrow().id)
+                        .filter(|e| e.clone().borrow().life > 0 &&
+                            e.clone().borrow().id != current_player.clone().borrow().id)
                         .map(|e| e.clone().borrow().name.clone())
                         .collect::<Vec<String>>();
                     creatures_name
@@ -273,10 +313,29 @@ impl Actions {
         Ok(())
     }
 
-    fn attack_action(creatures: &Vec<Rc<RefCell<Pawn>>>, player: Rc<RefCell<Pawn>>, menu: &Menu) -> std::io::Result<()> {
+    fn attack_action(creatures: &Vec<Rc<RefCell<Pawn>>>,
+                     player: Rc<RefCell<Pawn>>,
+                     senders: &HashMap<String, Sender<MessageContent>>,
+                     receivers: &HashMap<String, Receiver<MessageContent>>,
+                     menu: &Menu,
+                     room: &Vec<Vec<u8>>,
+                     graphical_mode: bool) -> std::io::Result<()> {
+        senders.get("gameplay_state").unwrap().send(MessageContent {
+            topic: "gameplay_state".to_string(),
+            content: bincode::serialize(&Actions::ATTACK).unwrap(),
+        }).unwrap();
+
+        let range = Self::calculate_range(player.clone(), room, 1);
+
         let attackable_things = creatures.clone()
             .iter()
-            .filter(|&e| e.borrow().life > 0)
+            .filter(|&e| {
+                e.borrow().life > 0 &&
+                    range.get(e.borrow().position.y as usize)
+                        .unwrap()
+                        .get(e.borrow().position.x as usize)
+                        .unwrap().clone()
+            })
             .map(|c| {
                 c.borrow().name.clone()
             })
@@ -323,11 +382,22 @@ impl Actions {
         }
 
         menu.write_line("Attack what?")?;
-        let selected_creature = Self::select_target(creatures, attackable_things, player.clone(), menu)?;
-
+        let selected_creature = if !graphical_mode || !player.clone().borrow().playable {
+            Self::select_target_console(creatures, attackable_things, player.clone(), menu)?
+        } else {
+            Self::select_target_ui(range, player.clone(), creatures, senders, receivers, &unwrapped_selected_item.get_damage_type().unwrap(),menu)?
+        };
         menu.write_line("Roll 1d20 : ")?;
 
-        Self::roll_dice_attack(player, unwrapped_selected_item, selected_creature, menu)?;
+        Self::roll_dice_attack(player.clone(), unwrapped_selected_item, selected_creature, menu)?;
+
+        if graphical_mode && player.clone().borrow().playable {
+
+            senders.get("info_response").unwrap().send(MessageContent {
+                topic: "info_response".to_string(),
+                content: "end_attack".as_bytes().to_vec(),
+            }).unwrap();
+        }
 
         return Ok(());
     }
@@ -380,14 +450,14 @@ impl Actions {
     }
 
     fn crititcal(player: &Rc<RefCell<Pawn>>, unwrapped_selected_item: &Rc<dyn Pocketable>, selected_creature: Rc<RefCell<Pawn>>, menu: &Menu) -> std::io::Result<()> {
-        menu.write_line("Critial!")?;
+        menu.write_line("Critical!")?;
 
         let damages_dealt = player.clone().borrow().hit(unwrapped_selected_item.clone(), selected_creature.clone());
         menu.write_line(format!("{} inflict {} to {}", player.clone().borrow().name, damages_dealt, selected_creature.clone().borrow().name).as_str())?;
         Ok(())
     }
 
-    fn select_target(creatures: &Vec<Rc<RefCell<Pawn>>>, attackable_things: Vec<String>, player: Rc<RefCell<Pawn>>, menu: &Menu) -> std::io::Result<Rc<RefCell<Pawn>>> {
+    fn select_target_console(creatures: &Vec<Rc<RefCell<Pawn>>>, attackable_things: Vec<String>, player: Rc<RefCell<Pawn>>, menu: &Menu) -> std::io::Result<Rc<RefCell<Pawn>>> {
         let target = {
             if player.clone().borrow().playable {
                 menu.menu(attackable_things).unwrap()
@@ -419,5 +489,58 @@ impl Actions {
             }
         };
         Ok(selected_creature)
+    }
+
+    fn select_target_ui(range: Vec<Vec<bool>>,
+                        player: Rc<RefCell<Pawn>>,
+                        creatures: &Vec<Rc<RefCell<Pawn>>>,
+                        senders: &HashMap<String, Sender<MessageContent>>,
+                        receivers: &HashMap<String, Receiver<MessageContent>>,
+                        damage_type: &DamageTypeEnum,
+                        menu: &Menu) -> std::io::Result<Rc<RefCell<Pawn>>> {
+        loop {
+            senders.get("targetable").unwrap().send(MessageContent {
+                topic: "targetable".to_string(),
+                content: bincode::serialize(&range).unwrap(),
+            }).unwrap();
+
+            let info_receiver = receivers.get("info").unwrap();
+            let selected_target: (u16, u16) = loop {
+                if let Ok(info) = info_receiver.try_recv() {
+                    break bincode::deserialize(info.content.as_slice()).unwrap();
+                }
+            };
+            let vec = creatures.iter()
+                .filter(|el| {
+                    Position {
+                        x: selected_target.0,
+                        y: selected_target.1,
+                    } == el.clone().borrow().position &&
+                        el.clone().borrow().id != player.clone().borrow().id
+                })
+                .map(|el| el.clone())
+                .collect::<Vec<Rc<RefCell<Pawn>>>>();
+
+
+            if !vec.is_empty() {
+                let targeted_creature = vec.first().unwrap().clone();
+
+                let position = (targeted_creature.borrow().position.x, targeted_creature.borrow().position.y);
+                senders.get("info_response").unwrap().send(MessageContent {
+                    topic: "info_response".to_string(),
+                    content: bincode::serialize(&(position, damage_type)).unwrap(),
+                }).unwrap();
+                return Ok((creatures.get(0).unwrap().clone()));
+            } else {
+                menu.clear_line()?;
+                menu.write_line("No target selected. Try again.")?;
+            }
+        }
+    }
+
+    fn calculate_range(player: Rc<RefCell<Pawn>>, room: &Vec<Vec<u8>>, range: u16) -> Vec<Vec<bool>> {
+        let (x, y) = (player.clone().borrow().position.x, player.clone().borrow().position.y);
+        let range = calculate_range((x, y), range, room);
+        range
     }
 }

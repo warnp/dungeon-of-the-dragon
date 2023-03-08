@@ -42,7 +42,7 @@ impl GameLoop {
                 playable: true,
                 equipped: Default::default(),
                 ai: Rc::new(RefCell::new(None)),
-                position: Position { x: 0, y: 0 },
+                position: Position { x: 4, y: 3 },
             }));
 
             let weather_list = Initializer::init_weather();
@@ -106,7 +106,7 @@ impl GameLoop {
                                         creatures.join(", ")
                 ).as_str())?;
 
-                Actions::handle_actions(&Self::order_pawns(pawns)?, &receivers,&senders,menu)?;
+                Actions::handle_actions(&Self::order_pawns(pawns)?, world, &receivers,&senders,menu)?;
 
                 menu.clear_line()?;
 

@@ -7,6 +7,7 @@ use crate::ai::ai::AI;
 use crate::gui::graphical::sprite::{Layer, ObjectToSprite, Sprite};
 use crate::gui::menu::Menu;
 use crate::inventory::item::{Item, ItemAttackTypeEnum, PartToEquiEnum, Pocketable, Spell};
+use crate::services::dice;
 
 pub const CA: u8 = 10;
 
@@ -18,19 +19,6 @@ pub struct Characteristics {
     pub intelligence: u8,
     pub willpower: u8,
     pub charisma: u8,
-}
-
-impl Display for Characteristics {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let characs = format!("Stats : \n\tFOR: {0}\n\tDEX: {1}\n\tCON: {2}\n\tINT: {3}\n\tWIL: {4}\n\tCHA: {5}",
-                              self.force.to_string(),
-                              self.dexterity.to_string(),
-                              self.constitution.to_string(),
-                              self.intelligence.to_string(),
-                              self.willpower.to_string(),
-                              self.charisma.to_string());
-        f.write_str(characs.as_str())
-    }
 }
 
 impl Add for Characteristics {
@@ -48,7 +36,7 @@ impl Add for Characteristics {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Position {
     pub x: u16,
     pub y: u16,
@@ -74,6 +62,11 @@ impl Pawn {
     pub fn hit(&self, item: Rc<dyn Pocketable>, target: Rc<RefCell<Pawn>>) -> u8 {
         target.clone().borrow_mut().take_hit(item.clone().get_damages())
     }
+
+    pub fn try_watch(&self, target: Rc<RefCell<Pawn>>) -> String {
+        target.clone().borrow().to_string(&self.characteristics, dice::Dice::roll_1d20() as u8)
+    }
+
 
     pub fn take_hit(&mut self, damage: u8) -> u8 {
         self.life -= damage;
@@ -195,21 +188,94 @@ impl Pawn {
     }
 }
 
-impl Display for Pawn {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+pub trait Watch {
+    fn to_string(&self, characs: &Characteristics, dice_1d20_roll: u8) -> String;
+}
+
+impl Watch for Characteristics {
+    fn to_string(&self, characs: &Characteristics, dice_1d20_roll: u8) -> String {
+        let roll_result = (((characs.intelligence + dice_1d20_roll) as f32 / 30.) * 6.).floor() as u8;
+
+        let mut buf = vec![];
+        let mut result = Characteristics {
+            ..Default::default()
+        };
+        for i in 0..roll_result {
+            let good_number = {
+                loop {
+                    let x = (rand::random::<f32>() * 6.).floor() as i32;
+                    if !buf.contains(&x) {
+                        buf.push(x);
+                        break x;
+                    }
+                }
+            };
+
+            match good_number {
+                0 => result.force = self.force,
+                1 => result.intelligence = self.intelligence,
+                2 => result.willpower = self.willpower,
+                3 => result.constitution = self.constitution,
+                4 => result.charisma = self.charisma,
+                5 => result.dexterity = self.dexterity,
+                _ => ()
+            }
+
+        }
+
+            format!("Stats : \n\tFOR: {0}\n\tDEX: {1}\n\tCON: {2}\n\tINT: {3}\n\tWIL: {4}\n\tCHA: {5}",
+                    result.force.to_string(),
+                    result.dexterity.to_string(),
+                    result.constitution.to_string(),
+                    result.intelligence.to_string(),
+                    result.willpower.to_string(),
+                    result.charisma.to_string())
+    }
+}
+
+impl Watch for Pawn {
+    fn to_string(&self, characs: &Characteristics, dice_1d20_roll: u8) -> String {
+
         let weapon_equipped = if let Some(weapon) = self.equipped.right_hand.as_ref() {
             weapon.name.as_str()
         } else {
             ""
         };
-        let pawn_display = format!("race: {race}\nequipped: {equipped}\n{stats}\nLife: {life}\nMana: {mana}",
-                                   race = self.race,
-                                   equipped = weapon_equipped,
-                                   stats = self.characteristics.to_string(),
-                                   life = self.life.to_string(),
-                                   mana = self.mana);
 
-        f.write_str(pawn_display.as_str())
+        //TODO We suppose that we cannot get over 10 by characs
+        let perception = (((characs.intelligence + dice_1d20_roll) as f32 / 30.) * 4.).floor() as u8;
+
+        let mut result = ("".to_string(), "".to_string(), "".to_string(), "".to_string());
+        let mut buf = vec![];
+        for i in 0..perception {
+            let good_number = {
+                loop {
+                    let x = (rand::random::<f32>() * 4.).floor() as i32;
+                    if !buf.contains(&x) {
+                        buf.push(x);
+                        break x;
+                    }
+                }
+            };
+
+            match good_number {
+                0 => result.0 = self.race.clone(),
+                1 => result.1 = weapon_equipped.to_string(),
+                2 => result.2 = self.life.to_string(),
+                3 => result.3 = self.mana.to_string(),
+                _ => ()
+            }
+
+        }
+
+        format!("race: {race}\nequipped: {equipped}\n{stats}\nLife: {life}\nMana: {mana}",
+                race = result.0,
+                equipped = result.1,
+                stats = self.characteristics.to_string(characs, dice_1d20_roll),
+                life = result.2,
+                mana = result.3)
+
+
     }
 }
 

@@ -31,7 +31,7 @@ impl AI {
         if let None = self.selected_target {
             self.select_target(self_ai.clone(), menu)?;
         }
-        //TODO Check if need equip weapon
+        //TODO Check if needs to equip weapon
         if let Some(_selected_target) = self.selected_target.clone() {
             return Ok(1); //Attack
         }
