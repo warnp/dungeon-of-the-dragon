@@ -39,12 +39,11 @@ pub struct MainState {
     gameplay_state: Option<Actions>,
     sprites_clicked: Vec<(f32, f32, Sprite)>,
     animator: Animator,
+    current_player_id: i64
 }
 
 impl Default for MainState {
     fn default() -> Self {
-
-
         MainState {
             sprites_movables: vec![],
             sprites_background: vec![],
@@ -65,6 +64,7 @@ impl Default for MainState {
             gameplay_state: None,
             sprites_clicked: vec![],
             animator: Animator::new(),
+            current_player_id: i64::MAX
         }
     }
 }
@@ -190,23 +190,23 @@ impl MainState {
 
     fn get_all_targetables_cell_to_sprites(&self) -> Vec<Sprite> {
         //Get all targetables cells
-        let targetables_receiver = self.receivers.get("targetable").unwrap();
-        let targetable_coordinates: Vec<Vec<bool>> = if let Ok(targetable) = targetables_receiver.try_recv() {
-            bincode::deserialize(targetable.content.as_slice()).unwrap()
+        if let Ok(targetable) = self.receivers.get("targetable").unwrap().try_recv() {
+            println!("plop 2 targetable");
+            let targetable_coordinates: Vec<Vec<bool>> = bincode::deserialize(targetable.content.as_slice()).unwrap();
+            targetable_coordinates.iter()
+                .enumerate()
+                .flat_map(|(y, row)| {
+                    row.iter().enumerate()
+                        .filter(|(x, &cell)| cell)
+                        .map(|(x, &cell)|
+                            Sprite::new(2, x as i32, y as i32, Layer::UI)
+                        )
+                        .collect::<Vec<Sprite>>()
+                })
+                .collect::<Vec<Sprite>>()
         } else {
             Vec::new()
-        };
-        targetable_coordinates.iter()
-            .enumerate()
-            .flat_map(|(y, row)| {
-                row.iter().enumerate()
-                    .filter(|(x, &cell)| cell)
-                    .map(|(x, &cell)|
-                        Sprite::new(2, x as i32, y as i32, Layer::UI)
-                    )
-                    .collect::<Vec<Sprite>>()
-            })
-            .collect::<Vec<Sprite>>()
+        }
     }
 
     fn wait_for_watch(&mut self) {
@@ -226,8 +226,6 @@ impl MainState {
                     None
                 }
             };
-
-            self.clear_after_turn();
         }
     }
 
@@ -238,36 +236,39 @@ impl MainState {
     }
 
     fn wait_for_attack(&mut self) {
-        if let Ok(response) = self.receivers.get("info_response").unwrap().try_recv() {
-            if let Ok(ending_attack_turn) = from_utf8( response.content.as_slice()) {
-                if ending_attack_turn == "end_attack" {
-                    self.clear_after_turn();
-                    return;
-                }
-            }
-            if let Ok(target_position) = bincode::deserialize::<((u16, u16), DamageTypeEnum)>(response.content.as_slice()) {
+        self.show_attack_ui_on_grid();
+    }
 
-                let sprite = Sprite::new(1, target_position.0.0 as i32, target_position.0.1 as i32, Layer::UI);
-                self.sprites_ui.append(&mut vec![sprite.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures)]);
-                let attack_particle = Sprite::new(100, target_position.0.0 as i32, target_position.0.1 as i32, Layer::PARTICLE)
-                    .create_drawable(SPRITE_SIZE as f32, &self.sprites_textures);
-
-                let damage_type = match target_position.1 {
-                    DamageTypeEnum::SLASHING => 1,
-                    DamageTypeEnum::FIRE => 0,
-                    _ => 0
-                };
-
-                self.particles.push((attack_particle.0, attack_particle.1, Instant::now(), damage_type));
-            }
-        } else {
-            let mut targetable_cells = self.get_all_targetables_cell_to_sprites();
+    fn show_attack_ui_on_grid(&mut self) {
+        let mut targetable_cells = self.get_all_targetables_cell_to_sprites();
+        if !targetable_cells.is_empty() {
             self.sprites_ui.append(&mut targetable_cells.iter()
                 .filter(|s| s.layer == Layer::UI)
                 .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
                 .collect::<Vec<(Image, DrawParam)>>());
 
             self.sprites.append(&mut targetable_cells);
+        }
+    }
+
+    fn show_damages(&mut self) {
+        if let Ok(response) = self.receivers.get("show_damage").unwrap().try_recv() {
+            println!("receive damage info");
+            if let Ok(target_position) = bincode::deserialize::<((u16, u16), DamageTypeEnum)>(response.content.as_slice()) {
+                let sprite = Sprite::new(1, target_position.0.0 as i32, target_position.0.1 as i32, Layer::UI);
+                self.sprites_ui.append(&mut vec![sprite.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures)]);
+                let attack_particle = Sprite::new(100, target_position.0.0 as i32, target_position.0.1 as i32, Layer::PARTICLE)
+                    .create_drawable(SPRITE_SIZE as f32, &self.sprites_textures);
+
+                let damage_type = match target_position.1 {
+                    DamageTypeEnum::FIRE => 0,
+                    DamageTypeEnum::SLASHING => 1,
+                    DamageTypeEnum::BLUNT => 2,
+                    _ => 0
+                };
+
+                self.particles.push((attack_particle.0, attack_particle.1, Instant::now(), damage_type));
+            }
         }
     }
 }
@@ -329,6 +330,10 @@ impl event::EventHandler<ggez::GameError> for MainState {
         let point2 = ctx.mouse.position();
         self.set_gameplay_state();
 
+        if let Ok(id_content) = self.receivers.get("current_player").unwrap().try_recv() {
+            self.current_player_id = bincode::deserialize(id_content.content.as_slice()).unwrap();
+        }
+
         if let Some(clear_container) = self.receivers.get("clear") {
             if let Ok(clear) = clear_container.try_recv() {
                 self.stdout.clear();
@@ -378,6 +383,9 @@ impl event::EventHandler<ggez::GameError> for MainState {
             }
         }
 
+        self.show_damages();
+
+
         if let Some(state) = self.gameplay_state.clone() {
             match state {
                 Actions::OPEN => {}
@@ -387,19 +395,27 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 Actions::USE => {}
                 Actions::EQUIP => {}
             }
+
+            if let Ok(response) = self.receivers.get("end_turn").unwrap().try_recv() {
+                if let Ok((ending_attack_turn, current_player_id)) = bincode::deserialize::<(&str, i64)>(response.topic.as_bytes()) {
+                    if ending_attack_turn == "end_attack" && self.current_player_id == current_player_id {
+                        self.clear_after_turn();
+                    }
+                }
+            }
         }
 
         self.mouse.set_pointer_position(point2.x, point2.y);
         self.animator.advance(1., ctx.time.delta().as_secs_f64());
 
-        self.particles.retain(|p: &(Image,DrawParam, Instant, u8)|  p.2.elapsed() < Duration::new(self.animation_duration as u64,0));
+        self.particles.retain(|p: &(Image, DrawParam, Instant, u8)| p.2.elapsed() < Duration::new(self.animation_duration as u64, 0));
 
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let fps = ctx.time.fps();
-        ctx.gfx.set_window_title(format!("fps: {0:.0}", fps).as_str());
+        ctx.gfx.set_window_title(format!("Dungeon of the dragon - fps: {0:.0}", fps).as_str());
         let mut canvas = Canvas::from_frame(
             ctx,
             graphics::Color::from([0., 0., 0., 1.0]),

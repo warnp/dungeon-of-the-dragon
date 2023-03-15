@@ -36,6 +36,9 @@ fn main() {
     let mut messenger_gameplay_sender = HashMap::new();
     let mut messenger_gameplay_receiver = HashMap::new();
     messenger_gameplay_sender.insert("sprite".to_string(), messaging.create_topic());
+    messenger_gameplay_sender.insert("current_player".to_string(), messaging.create_topic());
+    messenger_gameplay_sender.insert("end_turn".to_string(), messaging.create_topic());
+    messenger_gameplay_sender.insert("show_damage".to_string(), messaging.create_topic());
     messenger_gameplay_sender.insert("targetable".to_string(), messaging.create_topic());
     messenger_gameplay_sender.insert("info_response".to_string(), messaging.create_topic());
     messenger_gameplay_sender.insert("gameplay_state".to_string(), messaging.create_topic());
@@ -45,12 +48,24 @@ fn main() {
     let mut messenger_ui_map_sender = HashMap::new();
 
     messenger_ui_map_receiver.insert("sprite".to_string(), messaging.subscribe_to_topic("sprite".to_string()));
+
     messenger_ui_map_receiver.insert("stdout".to_string(), messaging.subscribe_to_topic("stdout".to_string()));
+
+    messenger_ui_map_receiver.insert("end_turn".to_string(), messaging.subscribe_to_topic("end_turn".to_string()));
+
+    messenger_ui_map_receiver.insert("show_damage".to_string(), messaging.subscribe_to_topic("show_damage".to_string()));
+
     messenger_ui_map_receiver.insert("select".to_string(), messaging.subscribe_to_topic("select".to_string()));
+
     messenger_ui_map_receiver.insert("targetable".to_string(), messaging.subscribe_to_topic("targetable".to_string()));
+    messenger_ui_map_receiver.insert("current_player".to_string(), messaging.subscribe_to_topic("current_player".to_string()));
+
     messenger_ui_map_receiver.insert("clear".to_string(), messaging.subscribe_to_topic("clear".to_string()));
+
     messenger_ui_map_receiver.insert("info_response".to_string(), messaging.subscribe_to_topic("info_response".to_string()));
+
     messenger_ui_map_receiver.insert("gameplay_state".to_string(), messaging.subscribe_to_topic("gameplay_state".to_string()));
+
     messenger_ui_map_sender.insert("select_response".to_string(), messaging.create_topic());
     messenger_ui_map_sender.insert("info".to_string(), messaging.create_topic());
 

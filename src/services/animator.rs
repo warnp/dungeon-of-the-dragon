@@ -60,6 +60,32 @@ impl Animator {
                 1.,
                 functions::Step
             )
+        ],keyframes![
+            (
+                Tweenable::new(0., 1./2., 1./4.,1./4.),
+                0.,
+                functions::Step
+            ),
+            (
+                Tweenable::new(1./4., 1./2., 1./4.,1./4.),
+                0.25,
+                functions::Step
+            ),
+            (
+                Tweenable::new(2./4., 1./2., 1./4.,1./4.),
+                0.5,
+                functions::Step
+            ),
+            (
+                Tweenable::new(3./4., 1./2., 1./4.,1./4.),
+                0.75,
+                functions::Step
+            ),
+            (
+                Tweenable::new(0., 1./2., 1./4.,1./4.),
+                1.,
+                functions::Step
+            )
         ]];
         Self {
             sequences: keyframes

@@ -35,23 +35,31 @@ impl Messaging {
 
 
     pub fn start_bus(incoming_messages: Vec<Receiver<MessageContent>>, outcoming_messages: Vec<(String, Sender<MessageContent>)>) -> thread::Result<()> {
+        println!("Bus is starting");
+        println!("Open topics are {:#?}", outcoming_messages.iter()
+            .map(|(topic, _)| topic.clone())
+            .collect::<Vec<String>>());
+
         let handle = thread::spawn(move || {
             println!("Starting message bus loop");
 
             //We handle message while we do not get lifecycle message to close the bus
             loop {
                 incoming_messages.iter()
-                    .enumerate()
-                    .for_each(|(i, rx)| {
+                    .for_each(|rx| {
                         if let Ok(message_content) = rx.try_recv() {
+                            // println!("Broadcasting on {} topic", message_content.topic);
                             outcoming_messages.iter()
                                 .enumerate()
                                 .filter(|(j, (topic, _))|
-                                   i != j.clone() && message_content.topic.clone() == topic.clone()
+                                   message_content.topic.clone() == topic.clone()
                                 )
                                 .for_each(|(_, (topic,sender))|{
+                                    // println!("Topic to send {}", topic);
                                     match sender.send(message_content.clone()) {
-                                        Ok(()) => println!("Message on topic {} distibuted", topic),
+                                        Ok(()) => {
+                                            // println!("Message on topic {} distibuted", topic)
+                                        },
                                         Err(e) => {
                                             println!("Error while distributing message on topic {} : {:#?}", topic, e.to_string());
                                         }

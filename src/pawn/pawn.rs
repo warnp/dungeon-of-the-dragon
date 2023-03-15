@@ -134,7 +134,7 @@ impl Pawn {
         let usability = item_clone.calculate_usability(&charac, mana);
         let pocketable_name = item_clone.get_name().to_string();
 
-        menu.write_line(format!("usability {}, charac {:#?}, pocketable charac {:#?}", usability, charac, item_clone.get_characteristics()).as_str())?;
+        menu.write_line(format!("usability {}", usability).as_str())?;
         if usability > 127 {
             menu.write_line(&format!("Good use of {}", pocketable_name))?;
             Ok(usability)

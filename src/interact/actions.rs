@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
+use std::thread::current;
 use console::Term;
 use rand::random;
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,13 @@ impl Actions {
         while let Some(current_pawn) = pawns_iter.next() {
             menu.write_line(format!("{} turn.", current_pawn.clone().borrow().name).as_str())?;
 
+            senders.get("current_player").unwrap().send(MessageContent {
+                topic: "current_player".to_string(),
+                content: bincode::serialize(&current_pawn.clone().borrow().id).unwrap(),
+            }).unwrap();
+
+            println!("debut de tour de {}", current_pawn.clone().borrow().name);
+
             let actions = ai::ai::let_ai_or_human_play(current_pawn.clone(),
                                                        || {
                                                            if let Ok(selected_action_id) = menu.menu(Actions::vec_string()) {
@@ -86,6 +94,8 @@ impl Actions {
                                                            }
                                                            None
                                                        });
+
+            menu.clear_line()?;
 
             let graphical_mode = false;
             #[cfg(feature = "graphical_mode")] let graphical_mode = true;
@@ -111,6 +121,8 @@ impl Actions {
                     Actions::EQUIP => Self::equip_item(current_pawn.clone(), menu)
                 }?;
             }
+            println!("fin de tour de {}", current_pawn.clone().borrow().name);
+
         }
 
         Ok(())
@@ -324,6 +336,7 @@ impl Actions {
             topic: "gameplay_state".to_string(),
             content: bincode::serialize(&Actions::ATTACK).unwrap(),
         }).unwrap();
+        println!("current player {}", player.clone().borrow().name);
 
         let range = Self::calculate_range(player.clone(), room, 1);
 
@@ -349,7 +362,7 @@ impl Actions {
         }
 
         if player.borrow().playable {
-            menu.write_line("whith ?")?;
+            menu.write_line("with ?")?;
         }
 
         //Select action
@@ -382,20 +395,41 @@ impl Actions {
         }
 
         menu.write_line("Attack what?")?;
-        let selected_creature = if !graphical_mode || !player.clone().borrow().playable {
-            Self::select_target_console(creatures, attackable_things, player.clone(), menu)?
+        let playable = player.clone().borrow().playable;
+
+        println!("select target");
+        let selected_creature = if !graphical_mode || !playable {
+            println!("pouet");
+            let targeted_creature = Self::select_target_console(creatures, attackable_things, player.clone(), menu)?;
+            if graphical_mode && !playable {
+                println!("plop 1 ai");
+                let toto: Vec<Vec<bool>> = Vec::new();
+                senders.get("targetable").unwrap().send(MessageContent {
+                    topic: "targetable".to_string(),
+                    content: bincode::serialize(&toto).unwrap(),
+                }).unwrap();
+                println!("plop 2 ai");
+
+                let targeted_creature = targeted_creature.clone();
+
+                let position = (targeted_creature.borrow().position.x, targeted_creature.borrow().position.y);
+                println!("ai send damage type info");
+                Self::send_damage_type_message(senders, &unwrapped_selected_item.get_damage_type().unwrap(), &position);
+            }
+            targeted_creature
         } else {
-            Self::select_target_ui(range, player.clone(), creatures, senders, receivers, &unwrapped_selected_item.get_damage_type().unwrap(),menu)?
+            println!("plop");
+
+            Self::select_target_ui(range, player.clone(), creatures, senders, receivers, &unwrapped_selected_item.get_damage_type().unwrap(), menu)?
         };
         menu.write_line("Roll 1d20 : ")?;
 
         Self::roll_dice_attack(player.clone(), unwrapped_selected_item, selected_creature, menu)?;
 
-        if graphical_mode && player.clone().borrow().playable {
-
-            senders.get("info_response").unwrap().send(MessageContent {
-                topic: "info_response".to_string(),
-                content: "end_attack".as_bytes().to_vec(),
+        if graphical_mode {
+            senders.get("end_turn").unwrap().send(MessageContent {
+                topic: "end_turn".to_string(),
+                content: bincode::serialize(&("end_attack".as_bytes().to_vec(), player.clone().borrow().id)).unwrap(),
             }).unwrap();
         }
 
@@ -499,10 +533,12 @@ impl Actions {
                         damage_type: &DamageTypeEnum,
                         menu: &Menu) -> std::io::Result<Rc<RefCell<Pawn>>> {
         loop {
+            println!("plop1");
             senders.get("targetable").unwrap().send(MessageContent {
                 topic: "targetable".to_string(),
                 content: bincode::serialize(&range).unwrap(),
             }).unwrap();
+            println!("plop2");
 
             let info_receiver = receivers.get("info").unwrap();
             let selected_target: (u16, u16) = loop {
@@ -510,6 +546,8 @@ impl Actions {
                     break bincode::deserialize(info.content.as_slice()).unwrap();
                 }
             };
+            println!("plop3");
+
             let vec = creatures.iter()
                 .filter(|el| {
                     Position {
@@ -526,16 +564,19 @@ impl Actions {
                 let targeted_creature = vec.first().unwrap().clone();
 
                 let position = (targeted_creature.borrow().position.x, targeted_creature.borrow().position.y);
-                senders.get("info_response").unwrap().send(MessageContent {
-                    topic: "info_response".to_string(),
-                    content: bincode::serialize(&(position, damage_type)).unwrap(),
-                }).unwrap();
+                Self::send_damage_type_message(senders, damage_type, &position);
                 return Ok((creatures.get(0).unwrap().clone()));
             } else {
-                menu.clear_line()?;
                 menu.write_line("No target selected. Try again.")?;
             }
         }
+    }
+
+    fn send_damage_type_message(senders: &HashMap<String, Sender<MessageContent>>, damage_type: &DamageTypeEnum, position: &(u16, u16)) {
+        senders.get("show_damage").unwrap().send(MessageContent {
+            topic: "show_damage".to_string(),
+            content: bincode::serialize(&(position, damage_type)).unwrap(),
+        }).unwrap();
     }
 
     fn calculate_range(player: Rc<RefCell<Pawn>>, room: &Vec<Vec<u8>>, range: u16) -> Vec<Vec<bool>> {
