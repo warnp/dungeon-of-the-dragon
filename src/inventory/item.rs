@@ -123,6 +123,8 @@ pub trait Pocketable {
 
     fn get_characteristics(&self) -> Characteristics;
 
+    fn get_range(&self) -> Option<u16>;
+
 }
 #[warn(non_camel_case_types)]
 #[derive(Debug, Clone,Eq, Hash, PartialEq)]
@@ -152,7 +154,7 @@ pub struct Item {
     pub part_to_equip: PartToEquiEnum,
     pub armor_point: u8,
     pub attack_type: Option<ItemAttackTypeEnum>,
-    pub range: Option<u8>
+    pub range: Option<u16>
 }
 
 #[derive(Debug, Clone)]
@@ -167,7 +169,7 @@ pub struct Spell {
     pub power_up: Option<Characteristics>,
     pub damages_type: Option<DamageTypeEnum>,
     pub attack_type: Option<ItemAttackTypeEnum>,
-    pub range: Option<u8>
+    pub range: Option<u16>
 }
 
 impl Pocketable for Item {
@@ -203,6 +205,10 @@ impl Pocketable for Item {
     fn get_characteristics(&self) -> Characteristics {
         self.requirements
     }
+
+    fn get_range(&self) -> Option<u16> {
+        self.range
+    }
 }
 
 impl Pocketable for Spell {
@@ -237,6 +243,10 @@ impl Pocketable for Spell {
 
     fn get_requirements(&self) -> &Characteristics {
         &self.requirements
+    }
+
+    fn get_range(&self) -> Option<u16> {
+        self.range
     }
 }
 

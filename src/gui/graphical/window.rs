@@ -39,7 +39,7 @@ pub struct MainState {
     gameplay_state: Option<Actions>,
     sprites_clicked: Vec<(f32, f32, Sprite)>,
     animator: Animator,
-    current_player_id: i64
+    current_player_id: i64,
 }
 
 impl Default for MainState {
@@ -64,7 +64,7 @@ impl Default for MainState {
             gameplay_state: None,
             sprites_clicked: vec![],
             animator: Animator::new(),
-            current_player_id: i64::MAX
+            current_player_id: i64::MAX,
         }
     }
 }
@@ -100,6 +100,7 @@ impl MainState {
         textures.insert(10, Image::from_path(ctx, "/dungeon_ground.png").unwrap());
         textures.insert(11, Image::from_path(ctx, "/door.png").unwrap());
         textures.insert(12, Image::from_path(ctx, "/door.png").unwrap());
+        textures.insert(20, Image::from_path(ctx, "/wall.png").unwrap());
         textures.insert(100, Image::from_path(ctx, "/particles.png").unwrap());
         textures.insert(200, Image::from_path(ctx, "/warrior.png").unwrap());
         textures.insert(201, Image::from_path(ctx, "/goblin.png").unwrap());
@@ -157,6 +158,7 @@ impl MainState {
             match gameplay_state {
                 Actions::WATCH => self.watch_action(&x, &y, sprites),
                 Actions::ATTACK => self.attack_action(&x, &y, sprites),
+                Actions::WALK_TO => self.walk_to_action(&x, &y, sprites),
                 _ => ()
             }
         }
@@ -169,6 +171,11 @@ impl MainState {
     }
 
     fn attack_action(&mut self, x: &f32, y: &f32, sprites: Vec<Sprite>) {
+        //Send click position info
+        self.send_info_message(&x, &y);
+    }
+
+    fn walk_to_action(&mut self, x: &f32, y: &f32, sprites: Vec<Sprite>) {
         //Send click position info
         self.send_info_message(&x, &y);
     }
@@ -191,7 +198,6 @@ impl MainState {
     fn get_all_targetables_cell_to_sprites(&self) -> Vec<Sprite> {
         //Get all targetables cells
         if let Ok(targetable) = self.receivers.get("targetable").unwrap().try_recv() {
-            println!("plop 2 targetable");
             let targetable_coordinates: Vec<Vec<bool>> = bincode::deserialize(targetable.content.as_slice()).unwrap();
             targetable_coordinates.iter()
                 .enumerate()
@@ -236,6 +242,10 @@ impl MainState {
     }
 
     fn wait_for_attack(&mut self) {
+        self.show_attack_ui_on_grid();
+    }
+
+    fn wait_for_walk(&mut self) {
         self.show_attack_ui_on_grid();
     }
 
@@ -390,7 +400,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
             match state {
                 Actions::OPEN => {}
                 Actions::ATTACK => self.wait_for_attack(),
-                Actions::WALK_TO => {}
+                Actions::WALK_TO => self.wait_for_walk(),
                 Actions::WATCH => self.wait_for_watch(),
                 Actions::USE => {}
                 Actions::EQUIP => {}

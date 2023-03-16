@@ -8,7 +8,7 @@ pub fn calculate_range(pawn_position: (u16, u16), range: u16, room: &Vec<Vec<u8>
     for j in 0..room.len() {
         let mut row = vec![];
         for i in 0..room.get(0).unwrap().len() {
-            if breath_result.contains(&(i as u16, j as u16)) {
+            if breath_result.contains(&(i as u16, j as u16)) && room.get(j).unwrap().get(i).unwrap() != &20u8 {
                 row.push(true);
             } else {
                 row.push(false);

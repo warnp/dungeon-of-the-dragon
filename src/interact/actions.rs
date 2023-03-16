@@ -1,6 +1,7 @@
 use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use std::io::Error;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::thread::current;
@@ -107,11 +108,7 @@ impl Actions {
                         Ok(())
                     }
                     Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, world, receivers, senders, menu, graphical_mode),
-                    Actions::WALK_TO => {
-                        println!("WALK TO");
-
-                        Ok(())
-                    }
+                    Actions::WALK_TO => Self::walk_action(&world.places.get(0).unwrap().room, receivers, senders, menu, current_pawn),
                     Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), senders, receivers, menu, &world.places.get(0).unwrap().room, graphical_mode),
                     Actions::OPEN => {
                         println!("OPEN");
@@ -124,6 +121,40 @@ impl Actions {
             println!("fin de tour de {}", current_pawn.clone().borrow().name);
 
         }
+
+        Ok(())
+    }
+
+    fn walk_action(room: &Vec<Vec<u8>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu, current_pawn: &Rc<RefCell<Pawn>>) -> Result<(), Error> {
+        senders.get("gameplay_state").unwrap().send(MessageContent {
+            topic: "gameplay_state".to_string(),
+            content: bincode::serialize(&Actions::WALK_TO).unwrap(),
+        }).unwrap();
+
+        let stats = (current_pawn.clone().borrow().characteristics.dexterity as u16 + current_pawn.clone().borrow().characteristics.force as u16) / 2u16;
+
+        let range = Self::calculate_range(current_pawn.clone(), room, stats);
+
+        let selected_target = loop {
+            let selected_target = Self::communicate_to_ui_for_target(&range, senders, receivers);
+            let x = range.get(selected_target.1 as usize).unwrap().get(selected_target.0 as usize).unwrap();
+            if *x {
+                break selected_target;
+            }
+        };
+        let current_pawn_id = current_pawn.clone().borrow().id;
+        let current_pawn_name = current_pawn.clone().borrow().name.clone();
+
+        let current_pawn_clone = current_pawn.clone();
+        let mut ref_mut1 = current_pawn_clone.borrow_mut();
+        ref_mut1.position = Position { x: selected_target.0, y: selected_target.1 };
+
+        senders.get("end_turn").unwrap().send(MessageContent {
+            topic: "end_turn".to_string(),
+            content: bincode::serialize(&("end_attack", current_pawn_id)).unwrap(),
+        }).unwrap();
+
+        menu.write_line(format!("{} walk...", current_pawn_name).as_str())?;
 
         Ok(())
     }
@@ -338,29 +369,6 @@ impl Actions {
         }).unwrap();
         println!("current player {}", player.clone().borrow().name);
 
-        let range = Self::calculate_range(player.clone(), room, 1);
-
-        let attackable_things = creatures.clone()
-            .iter()
-            .filter(|&e| {
-                e.borrow().life > 0 &&
-                    range.get(e.borrow().position.y as usize)
-                        .unwrap()
-                        .get(e.borrow().position.x as usize)
-                        .unwrap().clone()
-            })
-            .map(|c| {
-                c.borrow().name.clone()
-            })
-            .collect::<Vec<String>>();
-
-        //TODO Add attackable element if any
-
-        if attackable_things.is_empty() {
-            menu.write_line("There is nothing to attack")?;
-            return Ok(());
-        }
-
         if player.borrow().playable {
             menu.write_line("with ?")?;
         }
@@ -385,8 +393,36 @@ impl Actions {
             menu.write_line("You have no way to deal damage to any target!")?;
             return Ok(());
         }
-
         let unwrapped_selected_item = select_item_to_attack_with.unwrap();
+
+        if let None = unwrapped_selected_item.get_range() {
+            menu.write_line("You have no way to deal damage to any target!")?;
+            return Ok(());
+        }
+
+        let range = Self::calculate_range(player.clone(), room, unwrapped_selected_item.get_range().unwrap());
+
+        let attackable_things = creatures.clone()
+            .iter()
+            .filter(|&e| {
+                e.borrow().life > 0 &&
+                    range.get(e.borrow().position.y as usize)
+                        .unwrap()
+                        .get(e.borrow().position.x as usize)
+                        .unwrap().clone()
+            })
+            .map(|c| {
+                c.borrow().name.clone()
+            })
+            .collect::<Vec<String>>();
+
+        //TODO Add attackable element if any
+
+        if attackable_things.is_empty() {
+            menu.write_line("There is nothing to attack")?;
+            return Ok(());
+        }
+
         let usability = player.borrow().calculate_usability(unwrapped_selected_item.clone(), menu)?;
 
         if usability == 0 {
@@ -397,28 +433,22 @@ impl Actions {
         menu.write_line("Attack what?")?;
         let playable = player.clone().borrow().playable;
 
-        println!("select target");
         let selected_creature = if !graphical_mode || !playable {
-            println!("pouet");
             let targeted_creature = Self::select_target_console(creatures, attackable_things, player.clone(), menu)?;
             if graphical_mode && !playable {
-                println!("plop 1 ai");
                 let toto: Vec<Vec<bool>> = Vec::new();
                 senders.get("targetable").unwrap().send(MessageContent {
                     topic: "targetable".to_string(),
                     content: bincode::serialize(&toto).unwrap(),
                 }).unwrap();
-                println!("plop 2 ai");
 
                 let targeted_creature = targeted_creature.clone();
 
                 let position = (targeted_creature.borrow().position.x, targeted_creature.borrow().position.y);
-                println!("ai send damage type info");
                 Self::send_damage_type_message(senders, &unwrapped_selected_item.get_damage_type().unwrap(), &position);
             }
             targeted_creature
         } else {
-            println!("plop");
 
             Self::select_target_ui(range, player.clone(), creatures, senders, receivers, &unwrapped_selected_item.get_damage_type().unwrap(), menu)?
         };
@@ -533,22 +563,9 @@ impl Actions {
                         damage_type: &DamageTypeEnum,
                         menu: &Menu) -> std::io::Result<Rc<RefCell<Pawn>>> {
         loop {
-            println!("plop1");
-            senders.get("targetable").unwrap().send(MessageContent {
-                topic: "targetable".to_string(),
-                content: bincode::serialize(&range).unwrap(),
-            }).unwrap();
-            println!("plop2");
+            let selected_target = Self::communicate_to_ui_for_target(&range, senders, receivers);
 
-            let info_receiver = receivers.get("info").unwrap();
-            let selected_target: (u16, u16) = loop {
-                if let Ok(info) = info_receiver.try_recv() {
-                    break bincode::deserialize(info.content.as_slice()).unwrap();
-                }
-            };
-            println!("plop3");
-
-            let vec = creatures.iter()
+            let filtered_creatures = creatures.iter()
                 .filter(|el| {
                     Position {
                         x: selected_target.0,
@@ -560,8 +577,8 @@ impl Actions {
                 .collect::<Vec<Rc<RefCell<Pawn>>>>();
 
 
-            if !vec.is_empty() {
-                let targeted_creature = vec.first().unwrap().clone();
+            if !filtered_creatures.is_empty() {
+                let targeted_creature = filtered_creatures.first().unwrap().clone();
 
                 let position = (targeted_creature.borrow().position.x, targeted_creature.borrow().position.y);
                 Self::send_damage_type_message(senders, damage_type, &position);
@@ -570,6 +587,21 @@ impl Actions {
                 menu.write_line("No target selected. Try again.")?;
             }
         }
+    }
+
+    fn communicate_to_ui_for_target(range: &Vec<Vec<bool>>, senders: &HashMap<String, Sender<MessageContent>>, receivers: &HashMap<String, Receiver<MessageContent>>) -> (u16, u16) {
+        senders.get("targetable").unwrap().send(MessageContent {
+            topic: "targetable".to_string(),
+            content: bincode::serialize(&range).unwrap(),
+        }).unwrap();
+
+        let info_receiver = receivers.get("info").unwrap();
+        let selected_target: (u16, u16) = loop {
+            if let Ok(info) = info_receiver.try_recv() {
+                break bincode::deserialize(info.content.as_slice()).unwrap();
+            }
+        };
+        selected_target
     }
 
     fn send_damage_type_message(senders: &HashMap<String, Sender<MessageContent>>, damage_type: &DamageTypeEnum, position: &(u16, u16)) {
