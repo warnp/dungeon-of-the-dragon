@@ -108,7 +108,7 @@ impl Actions {
                         Ok(())
                     }
                     Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, world, receivers, senders, menu, graphical_mode),
-                    Actions::WALK_TO => Self::walk_action(&world.places.get(0).unwrap().room, receivers, senders, menu, current_pawn),
+                    Actions::WALK_TO => Self::walk_action(&world.places.get(0).unwrap().room, receivers, senders, menu, current_pawn, &world.places.iter().map(|el| el.id).collect::<Vec<u8>>()),
                     Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), senders, receivers, menu, &world.places.get(0).unwrap().room, graphical_mode),
                     Actions::OPEN => {
                         println!("OPEN");
@@ -125,13 +125,13 @@ impl Actions {
         Ok(())
     }
 
-    fn walk_action(room: &Vec<Vec<u8>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu, current_pawn: &Rc<RefCell<Pawn>>) -> Result<(), Error> {
+    fn walk_action(room: &Vec<Vec<u8>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu, current_pawn: &Rc<RefCell<Pawn>>, places_id: &Vec<u8>) -> Result<(), Error> {
         senders.get("gameplay_state").unwrap().send(MessageContent {
             topic: "gameplay_state".to_string(),
             content: bincode::serialize(&Actions::WALK_TO).unwrap(),
         }).unwrap();
 
-        let stats = (current_pawn.clone().borrow().characteristics.dexterity as u16 + current_pawn.clone().borrow().characteristics.force as u16) / 2u16;
+        let stats = (current_pawn.clone().borrow().characteristics.dexterity as u16 + current_pawn.clone().borrow().characteristics.force as u16) / 3u16;
 
         let range = Self::calculate_range(current_pawn.clone(), room, stats);
 
@@ -142,21 +142,44 @@ impl Actions {
                 break selected_target;
             }
         };
+        let desired_next_position = room.get(selected_target.1 as usize).unwrap().get(selected_target.0 as usize).unwrap();
+
+        let door_id = places_id.iter()
+            .filter(|&&el| {
+                el == desired_next_position.clone()
+            })
+            .collect::<Vec<&u8>>()
+            .first();
+
         let current_pawn_id = current_pawn.clone().borrow().id;
         let current_pawn_name = current_pawn.clone().borrow().name.clone();
 
-        let current_pawn_clone = current_pawn.clone();
-        let mut ref_mut1 = current_pawn_clone.borrow_mut();
-        ref_mut1.position = Position { x: selected_target.0, y: selected_target.1 };
+        if let Some(&id) = door_id {
+            Self::send_end_turn_signal(senders, current_pawn_id);
 
+            menu.write_line(format!("{} walk to the door...", current_pawn_name).as_str())?;
+        }else if desired_next_position == &20u8 {
+            Self::send_end_turn_signal(senders, current_pawn_id);
+
+            menu.write_line(format!("{} cannot walk there", current_pawn_name).as_str())?;
+        }else {
+
+            let current_pawn_clone = current_pawn.clone();
+            let mut ref_mut1 = current_pawn_clone.borrow_mut();
+            ref_mut1.position = Position { x: selected_target.0, y: selected_target.1 };
+
+            Self::send_end_turn_signal(senders, current_pawn_id);
+
+            menu.write_line(format!("{} walk...", current_pawn_name).as_str())?;
+        }
+        Ok(())
+    }
+
+    fn send_end_turn_signal(senders: &HashMap<String, Sender<MessageContent>>, current_pawn_id: i64) {
         senders.get("end_turn").unwrap().send(MessageContent {
             topic: "end_turn".to_string(),
             content: bincode::serialize(&("end_attack", current_pawn_id)).unwrap(),
         }).unwrap();
-
-        menu.write_line(format!("{} walk...", current_pawn_name).as_str())?;
-
-        Ok(())
     }
 
     fn watch_action(current_player: Rc<RefCell<Pawn>>,

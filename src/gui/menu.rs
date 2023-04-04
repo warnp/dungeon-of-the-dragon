@@ -7,11 +7,8 @@ use dialoguer::theme::ColorfulTheme;
 use lazy_static::lazy_static;
 use crate::services::messaging::MessageContent;
 
-lazy_static! {
-    static ref STDOUT: Term = Term::stdout();
-}
-
 pub struct Menu {
+    STDOUT: Term,
     select_menu: Sender<MessageContent>,
     selected_option: Receiver<MessageContent>,
     stdout: Sender<MessageContent>,
@@ -25,6 +22,7 @@ impl Menu {
                 clear: Sender<MessageContent>,
     ) -> Self {
         Self {
+            STDOUT: Term::stdout(),
             selected_option,
             select_menu,
             stdout,
@@ -38,7 +36,7 @@ impl Menu {
             return Select::with_theme(&ColorfulTheme::default())
                 .items(options.as_slice())
                 .default(0)
-                .interact_on_opt(&Term::stderr())?;
+                .interact_on_opt(&Term::stderr());
         }
         #[cfg(feature = "graphical_mode")]
         {
@@ -53,7 +51,7 @@ impl Menu {
             loop {
                 if let Ok(command) = self.selected_option.try_recv() {
                     let ok = Ok(Some(bincode::deserialize(command.content.as_slice()).unwrap()));
-                    return ok;
+                    break ok;
                 }
             }
         }
@@ -62,7 +60,7 @@ impl Menu {
     pub fn write_line(&self, out: &str) -> std::io::Result<()> {
         #[cfg(not(feature = "graphical_mode"))]
         {
-            return STDOUT::write_line(out)?;
+            return self.STDOUT.write_line(out)?;
         }
 
         #[cfg(feature = "graphical_mode")]
@@ -79,7 +77,7 @@ impl Menu {
 
     pub fn clear_line(&self) -> std::io::Result<()> {
         #[cfg(not(feature = "graphical_mode"))]
-        STDOUT.clear_line()?;
+        self.STDOUT.clear_line()?;
 
         #[cfg(feature = "graphical_mode")]
         {
