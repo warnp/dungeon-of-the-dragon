@@ -246,7 +246,7 @@ impl MainState {
     }
 
     fn wait_for_walk(&mut self) {
-        self.show_attack_ui_on_grid();
+        // TODO Do nothing at the moment
     }
 
     fn show_attack_ui_on_grid(&mut self) {
@@ -280,6 +280,13 @@ impl MainState {
                 self.particles.push((attack_particle.0, attack_particle.1, Instant::now(), damage_type));
             }
         }
+    }
+
+    fn get_sprites(&mut self, sprites: &Vec<Sprite>, layer: Layer) -> Vec<(Image, DrawParam)> {
+        sprites.iter()
+            .filter(|s| s.layer == layer)
+            .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
+            .collect::<Vec<(Image, DrawParam)>>()
     }
 }
 
@@ -374,20 +381,11 @@ impl event::EventHandler<ggez::GameError> for MainState {
             if let Ok(sprites) = receiver.try_recv() {
                 let sprites: Vec<Sprite> = bincode::deserialize(sprites.content.as_slice()).unwrap();
 
-                self.sprites_movables = sprites.iter()
-                    .filter(|s| s.layer == Layer::MOVABLES)
-                    .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
-                    .collect::<Vec<(Image, DrawParam)>>();
+                self.sprites_movables = self.get_sprites(&sprites, Layer::MOVABLES);
 
-                self.sprites_background = sprites.iter()
-                    .filter(|s| s.layer == Layer::BACKGROUND)
-                    .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
-                    .collect::<Vec<(Image, DrawParam)>>();
+                self.sprites_background = self.get_sprites(&sprites, Layer::BACKGROUND);
 
-                self.sprites_ui = sprites.iter()
-                    .filter(|s| s.layer == Layer::UI)
-                    .map(|e| e.create_drawable(SPRITE_SIZE as f32, &self.sprites_textures))
-                    .collect::<Vec<(Image, DrawParam)>>();
+                self.sprites_ui = self.get_sprites(&sprites, Layer::UI);
 
                 self.sprites = sprites
             }
@@ -405,6 +403,7 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 Actions::USE => {}
                 Actions::EQUIP => {}
             }
+
 
             if let Ok(response) = self.receivers.get("end_turn").unwrap().try_recv() {
                 if let Ok((ending_attack_turn, current_player_id)) = bincode::deserialize::<(&str, i64)>(response.topic.as_bytes()) {

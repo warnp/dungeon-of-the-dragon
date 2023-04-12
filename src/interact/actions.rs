@@ -66,6 +66,7 @@ impl Display for Actions {
 impl Actions {
     pub fn handle_actions(pawns: &Vec<Rc<RefCell<Pawn>>>,
                           world: &World,
+                          place_id:&mut u8,
                           receivers: &HashMap<String, Receiver<MessageContent>>,
                           senders: &HashMap<String, Sender<MessageContent>>,
                           menu: &Menu) -> std::io::Result<()> {
@@ -102,14 +103,15 @@ impl Actions {
             #[cfg(feature = "graphical_mode")] let graphical_mode = true;
 
             if let Some(action) = actions {
+                let room_arrays = &world.places.iter().find(|&place| place.id == place_id.clone()).unwrap().room;
                 match action.into() {
                     Actions::USE => {
                         println!("USE");
                         Ok(())
                     }
-                    Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, world, receivers, senders, menu, graphical_mode),
-                    Actions::WALK_TO => Self::walk_action(&world.places.get(0).unwrap().room, receivers, senders, menu, current_pawn, &world.places.iter().map(|el| el.id).collect::<Vec<u8>>()),
-                    Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), senders, receivers, menu, &world.places.get(0).unwrap().room, graphical_mode),
+                    Actions::WATCH => Self::watch_action(current_pawn.clone(), pawns, &room_arrays, receivers, senders, menu, graphical_mode),
+                    Actions::WALK_TO => Self::walk_action(&room_arrays, receivers, senders, menu, current_pawn, &world.places.iter().map(|el| el.id).collect::<Vec<u8>>(), place_id),
+                    Actions::ATTACK => Self::attack_action(pawns, current_pawn.clone(), senders, receivers, menu, &room_arrays, graphical_mode),
                     Actions::OPEN => {
                         println!("OPEN");
 
@@ -119,21 +121,27 @@ impl Actions {
                 }?;
             }
             println!("fin de tour de {}", current_pawn.clone().borrow().name);
-
         }
 
         Ok(())
     }
 
-    fn walk_action(room: &Vec<Vec<u8>>, receivers: &HashMap<String, Receiver<MessageContent>>, senders: &HashMap<String, Sender<MessageContent>>, menu: &Menu, current_pawn: &Rc<RefCell<Pawn>>, places_id: &Vec<u8>) -> Result<(), Error> {
+    fn walk_action(room: &Vec<Vec<u8>>,
+                   receivers: &HashMap<String, Receiver<MessageContent>>,
+                   senders: &HashMap<String, Sender<MessageContent>>,
+                   menu: &Menu,
+                   current_pawn: &Rc<RefCell<Pawn>>,
+                   places_id: &Vec<u8>,
+                   place_id: &mut u8) -> Result<(), Error> {
         senders.get("gameplay_state").unwrap().send(MessageContent {
             topic: "gameplay_state".to_string(),
             content: bincode::serialize(&Actions::WALK_TO).unwrap(),
         }).unwrap();
 
-        let stats = (current_pawn.clone().borrow().characteristics.dexterity as u16 + current_pawn.clone().borrow().characteristics.force as u16) / 3u16;
+        let current_pawn_clone = current_pawn.clone();
+        let stats = (current_pawn_clone.borrow().characteristics.dexterity as u16 + current_pawn_clone.borrow().characteristics.force as u16) / 3u16;
 
-        let range = Self::calculate_range(current_pawn.clone(), room, stats);
+        let range = Self::calculate_range(current_pawn_clone.clone(), room, stats);
 
         let selected_target = loop {
             let selected_target = Self::communicate_to_ui_for_target(&range, senders, receivers);
@@ -144,27 +152,33 @@ impl Actions {
         };
         let desired_next_position = room.get(selected_target.1 as usize).unwrap().get(selected_target.0 as usize).unwrap();
 
-        let door_id = places_id.iter()
+        let filtered_next_door = places_id.iter()
             .filter(|&&el| {
                 el == desired_next_position.clone()
             })
-            .collect::<Vec<&u8>>()
+            .collect::<Vec<&u8>>();
+        let door_id = filtered_next_door
             .first();
 
-        let current_pawn_id = current_pawn.clone().borrow().id;
-        let current_pawn_name = current_pawn.clone().borrow().name.clone();
+        let current_pawn_id = current_pawn_clone.borrow().id;
+        let current_pawn_name = current_pawn_clone.borrow().name.clone();
 
+        //We click on door
         if let Some(&id) = door_id {
-            Self::send_end_turn_signal(senders, current_pawn_id);
+            *place_id = id.clone();
+            println!("next door {}, current next {}", id, place_id);
 
+            Self::send_end_turn_signal(senders, current_pawn_id);
             menu.write_line(format!("{} walk to the door...", current_pawn_name).as_str())?;
-        }else if desired_next_position == &20u8 {
+        }
+        //We click on a wall or non walkable surface
+        else if desired_next_position == &20u8 {
             Self::send_end_turn_signal(senders, current_pawn_id);
 
             menu.write_line(format!("{} cannot walk there", current_pawn_name).as_str())?;
-        }else {
-
-            let current_pawn_clone = current_pawn.clone();
+        }
+        //We click on walkable surface
+        else {
             let mut ref_mut1 = current_pawn_clone.borrow_mut();
             ref_mut1.position = Position { x: selected_target.0, y: selected_target.1 };
 
@@ -184,7 +198,7 @@ impl Actions {
 
     fn watch_action(current_player: Rc<RefCell<Pawn>>,
                     creatures: &Vec<Rc<RefCell<Pawn>>>,
-                    world: &World,
+                    room: &Vec<Vec<u8>>,
                     receivers: &HashMap<String, Receiver<MessageContent>>,
                     senders: &HashMap<String, Sender<MessageContent>>,
                     menu: &Menu,
@@ -215,8 +229,7 @@ impl Actions {
                             content: creature_stats.as_str().as_bytes().to_vec(),
                         }).unwrap();
                     } else {
-                        let place: &Place = world.places.get(0).unwrap();
-                        let tile_spec = place.room.get(y as usize)
+                        let tile_spec = room.get(y as usize)
                             .unwrap()
                             .get(x as usize)
                             .unwrap();
@@ -472,7 +485,6 @@ impl Actions {
             }
             targeted_creature
         } else {
-
             Self::select_target_ui(range, player.clone(), creatures, senders, receivers, &unwrapped_selected_item.get_damage_type().unwrap(), menu)?
         };
         menu.write_line("Roll 1d20 : ")?;

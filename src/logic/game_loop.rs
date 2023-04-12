@@ -59,8 +59,10 @@ impl GameLoop {
                     receivers: HashMap<String, Receiver<MessageContent>>,
                     menu: &Menu) -> std::io::Result<()> {
         let senders = senders;
+        let mut current_place_id: u8 = 12;
         loop {
-            let world_current_place = world.places.get(0).unwrap();
+            println!("current place id {}", current_place_id);
+            let world_current_place = world.places.iter().find(|&r| r.id == current_place_id).unwrap();
             menu.write_line(format!("You arrived in {}", world_current_place.name).as_str()).unwrap();
 
             let pawns: &Vec<Rc<RefCell<Pawn>>> = &world_current_place.pawns;
@@ -92,7 +94,7 @@ impl GameLoop {
             sender.send(message_content).unwrap();
 
 
-            loop {
+            // loop {
                 let creatures = (&pawns)
                     .iter()
                     .filter(|e| !e.borrow().playable)
@@ -106,7 +108,7 @@ impl GameLoop {
                                         creatures.join(", ")
                 ).as_str())?;
 
-                Actions::handle_actions(&Self::order_pawns(pawns)?, world, &receivers,&senders,menu)?;
+                Actions::handle_actions(&Self::order_pawns(pawns)?, world, &mut current_place_id, &receivers, &senders, menu)?;
 
                 menu.clear_line()?;
 
@@ -125,7 +127,7 @@ impl GameLoop {
 
                 let sender = senders.get("sprite").unwrap();
                 sender.send(message_content).unwrap();
-            }
+            // }
         }
     }
 
